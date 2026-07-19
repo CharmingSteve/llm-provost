@@ -1,0 +1,119 @@
+services:
+  alpaca-mcp:
+    # Alpaca image is built with docker build and pushed to ECR. Digest is sourced from .env.versions via: docker compose --env-file .env.versions. It is built from the alpace-mcp.Dockerfile in the root of this repo.
+    image: ${ALPACA_IMAGE}@${ALPACA_IMAGE_TAG}
+    pull_policy: if_not_present
+    container_name: alpaca-mcp
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ${PROVOST_SECRETS_DIR:-./.secrets}:/run/secrets:ro
+      - /etc/localtime:/etc/localtime:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      TRADE_API_URL: "http://agent-provost:8081/trading"
+      DATA_API_URL: "http://agent-provost:8081/data"
+      BROKER_API_URL: "http://agent-provost:8081/broker"
+      ALPACA_API_KEY: ${ALPACA_API_KEY:-}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
+      TZ: ${TZ:-Asia/Jerusalem}
+    expose:
+      - "8088"
+    networks:
+      - mcp_internal
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    pids_limit: 256
+    restart: unless-stopped
+
+  fluent-bit:
+    image: ${FLUENT_BIT_IMAGE}
+    pull_policy: if_not_present
+    container_name: fluent-bit
+    command: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.conf"]
+    volumes:
+      - ./fluent-bit:/fluent-bit/etc:ro
+      - provost_run:/var/run/provost
+      - ./logs/fluent-bit-storage:/var/log/fluent-bit/storage
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      S3_BUCKET: ${S3_BUCKET:-agent-provost-local}
+      S3_KEY_PREFIX: ${S3_KEY_PREFIX:-}
+      INSTANCE_ID: ${INSTANCE_ID:-local-dev}
+      TZ: ${TZ:-Asia/Jerusalem}
+      CI_TESTING: ${CI_TESTING:-false}
+    healthcheck:
+      test: ["CMD", "/fluent-bit/bin/fluent-bit", "--version"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - mcp_internal
+      - proxy_egress
+    security_opt:
+      - no-new-privileges:true
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    pids_limit: 256
+    restart: unless-stopped
+  agent-provost:
+    # Agent Provost image  is the public Openresty image with a custom entrypoint script that runs the rules. Digest is sourced from .env.versions via: docker compose --env-file .env.versions. It is  Digest is sourced from .env.versions via: docker compose --env-file .env.versions 
+    image: ${OPENRESTY_IMAGE}
+    pull_policy: if_not_present
+    container_name: agent-provost
+    depends_on:
+      alpaca-mcp:
+        condition: service_started
+      fluent-bit:
+        condition: service_healthy
+    ports:
+      - "8088:8000"
+    expose:
+      - "8081"
+    volumes:
+      - ./default.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - ./lua:/etc/nginx/lua:ro
+      - ./rules.json:/etc/rules.json:ro
+      - ${PROVOST_SECRETS_DIR:-./.secrets}:/run/secrets:ro
+      - provost_run:/var/run/provost
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      TZ: ${TZ:-Asia/Jerusalem}
+    networks:
+      - mcp_internal
+      - proxy_egress
+    security_opt:
+      - no-new-privileges:true
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    pids_limit: 256
+    restart: unless-stopped
+
+networks:
+  mcp_internal:
+    internal: true
+  proxy_egress:
+
+volumes:
+  provost_run:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=0,gid=0,mode=0777

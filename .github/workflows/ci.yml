@@ -1,0 +1,749 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - .env.versions
+  workflow_dispatch:
+
+# Restrict the default GITHUB_TOKEN to read-only; jobs that need more
+# permissions declare their own permissions block explicitly.
+permissions:
+  contents: read
+
+jobs:
+  # ── Shell linting ──────────────────────────────────────────────────────────
+  lint-shell:
+    name: ShellCheck
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+      - name: Lint shell scripts
+        run: |
+          set -euo pipefail
+          shellcheck entrypoint.sh
+          shellcheck verify_proxy_routing.sh
+          find scripts -type f -name "*.sh" -exec shellcheck {} +
+
+  # ── Dockerfile linting ─────────────────────────────────────────────────────
+  lint-dockerfile:
+    name: Hadolint
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Hadolint
+        run: |
+          set -euo pipefail
+          HADOLINT_VERSION="v2.14.0"
+          HADOLINT_BIN="hadolint-linux-arm64"
+          HADOLINT_BASE_URL="https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}"
+          curl -fsSL -o "/tmp/${HADOLINT_BIN}" "${HADOLINT_BASE_URL}/${HADOLINT_BIN}"
+          curl -fsSL -o "/tmp/${HADOLINT_BIN}.sha256" "${HADOLINT_BASE_URL}/${HADOLINT_BIN}.sha256"
+          (cd /tmp && sha256sum -c "${HADOLINT_BIN}.sha256")
+          sudo install -m 0755 "/tmp/${HADOLINT_BIN}" /usr/local/bin/hadolint
+      - name: Lint Dockerfile
+        run: |
+          hadolint alpaca-mcp.Dockerfile
+
+  # ── Lua linting ────────────────────────────────────────────────────────────
+  lint-lua:
+    name: luacheck
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install luacheck
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y lua5.1 luarocks
+          sudo luarocks install luacheck
+      - name: Lint Lua test files
+        run: luacheck tests/lua/
+
+  # ── Lua unit tests ─────────────────────────────────────────────────────────
+  test-lua:
+    name: busted (Lua unit tests)
+    runs-on: ubuntu-24.04-arm
+    needs: [lint-lua]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install busted and lua-cjson
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y lua5.1 luarocks
+          sudo luarocks install busted
+          sudo luarocks install lua-cjson
+      - name: Run Lua unit tests
+        run: busted tests/lua/
+
+  # ── Shell unit tests ───────────────────────────────────────────────────────
+  test-shell:
+    name: bats (shell unit tests)
+    runs-on: ubuntu-24.04-arm
+    needs: [lint-shell]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats and check-jsonschema
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y bats python3-venv
+          python3 -m venv /tmp/check-jsonschema-venv
+          /tmp/check-jsonschema-venv/bin/pip install --quiet check-jsonschema
+          echo "/tmp/check-jsonschema-venv/bin" >> "$GITHUB_PATH"
+      - name: Run bats tests
+        run: bats tests/shell/
+
+  # ── GitHub Actions workflow linting ──────────────────────────────────────
+  lint-github-actions:
+    name: actionlint (GitHub Actions)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          ACTIONLINT_VERSION="1.7.12"
+          ACTIONLINT_TARBALL="actionlint_${ACTIONLINT_VERSION}_linux_arm64.tar.gz"
+          ACTIONLINT_BASE_URL="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          curl -fsSL -o "/tmp/${ACTIONLINT_TARBALL}" "${ACTIONLINT_BASE_URL}/${ACTIONLINT_TARBALL}"
+          tar -xzf "/tmp/${ACTIONLINT_TARBALL}" -C /tmp actionlint
+          sudo install -m 0755 /tmp/actionlint /usr/local/bin/actionlint
+      - name: Lint workflow files
+        run: |
+          set -euo pipefail
+          actionlint
+
+  # ── GitHub Actions workflow security linting ─────────────────────────────
+  security-zizmor:
+    name: zizmor (GitHub Actions security)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install zizmor
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install zizmor==1.24.1
+      - name: Scan workflow files
+        run: |
+          set -euo pipefail
+          zizmor .github/workflows/
+
+  # ── Compose smoke test (always-on) ────────────────────────────────────────
+  compose-smoke:
+    name: Compose smoke (up/health/down)
+    runs-on: ubuntu-24.04-arm
+    needs: [test-lua, test-shell, build-secure-push-test]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Fetch latest workflow-updated branch state
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          git fetch origin
+          git reset --hard "origin/${BRANCH}"
+
+      - name: Stage dummy secrets for compose runtime
+
+        run: |
+          eval "$(sh bootstrap.sh runner)"
+      - name: Ensure local dirs for bind mounts
+        run: |
+          mkdir -p logs/fluent-bit-storage/final
+          chmod -R a+rwx logs/fluent-bit-storage
+      - name: Bring up compose stack
+        run: |
+          set -euo pipefail
+          export ALPACA_API_KEY="dummy"
+          export ALPACA_SECRET_KEY="dummy"
+          set +e
+          docker compose --env-file .env.versions pull
+          docker compose --env-file .env.versions up -d
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::Initial compose startup failed; collecting diagnostics and retrying once"
+            docker compose --env-file .env.versions ps -a || true
+            docker compose --env-file .env.versions logs --tail 120 fluent-bit agent-provost alpaca-mcp || true
+            docker compose --env-file .env.versions down -v --remove-orphans || true
+            docker compose --env-file .env.versions pull
+            docker compose --env-file .env.versions up -d
+          fi
+      - name: Check compose service states
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.versions ps
+          [ "$(docker inspect -f '{{.State.Status}}' alpaca-mcp)" = "running" ]
+          [ "$(docker inspect -f '{{.State.Status}}' agent-provost)" = "running" ]
+          [ "$(docker inspect -f '{{.State.Health.Status}}' fluent-bit)" = "healthy" ]
+      - name: Tear down compose stack
+        if: always()
+        run: docker compose --env-file .env.versions down -v --remove-orphans
+
+  # ── Trivy filesystem scan ──────────────────────────────────────────────────
+  security-trivy:
+    name: Trivy (filesystem / image scan)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set local trivy build tag for alpaca image
+        run: echo "TRIVY_BUILD_TAG=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+      - name: Load image versions from .env.versions
+        run: grep -v '^#' .env.versions | grep -v '^$' >> "$GITHUB_ENV"
+      - name: Stage dummy secrets for compose parsing
+        run: |
+          eval "$(sh bootstrap.sh runner)"
+      - name: Validate docker compose spec
+        env:
+          DOCKER_DEFAULT_PLATFORM: linux/arm64
+        run: docker compose --env-file .env.versions -f docker-compose.yml config --quiet
+      - name: Install Trivy
+        run: |
+          set -euo pipefail
+          TRIVY_VERSION="0.71.2"
+          TRIVY_TARBALL="trivy_${TRIVY_VERSION}_Linux-ARM64.tar.gz"
+          TRIVY_BASE_URL="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          curl -fsSL -o "/tmp/${TRIVY_TARBALL}" "${TRIVY_BASE_URL}/${TRIVY_TARBALL}"
+          curl -fsSL -o /tmp/trivy-checksums.txt "${TRIVY_BASE_URL}/trivy_${TRIVY_VERSION}_checksums.txt"
+          grep " ${TRIVY_TARBALL}$" /tmp/trivy-checksums.txt > /tmp/trivy.sha256
+          (cd /tmp && sha256sum -c /tmp/trivy.sha256)
+          tar -xzf "/tmp/${TRIVY_TARBALL}" -C /tmp trivy
+          sudo install -m 0755 /tmp/trivy /usr/local/bin/trivy
+      - name: Debug Trivy version and DB
+        run: |
+          trivy --version
+          trivy image --download-db-only
+      - name: Trivy filesystem scan
+        run: |
+          set +e
+          trivy fs --exit-code 1 --severity CRITICAL,HIGH .
+          echo "TRIVY_FS_STATUS=$?" >> "$GITHUB_ENV"
+      - name: Authenticate to AWS for ECR Public pulls
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Login to ECR Public
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+      - name: Pull and build images for scan
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.versions -f docker-compose.yml pull agent-provost
+          for attempt in 1 2 3 4 5; do
+            if docker pull "${FLUENT_BIT_IMAGE}"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::docker pull ${FLUENT_BIT_IMAGE} failed after 5 attempts"
+              exit 1
+            fi
+            echo "::warning::docker pull ${FLUENT_BIT_IMAGE} failed (attempt ${attempt}/5); retrying"
+            sleep 5
+          done
+          docker build -f alpaca-mcp.Dockerfile --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" -t agent-provost-alpaca-mcp:"${TRIVY_BUILD_TAG}" .
+      - name: Trivy image scan (agent-provost)
+        run: |
+          set +e
+          trivy image --exit-code 1 --severity CRITICAL,HIGH "${OPENRESTY_IMAGE}" > /tmp/trivy-openresty.txt 2>&1
+          trivy_openresty_status=$?
+          cat /tmp/trivy-openresty.txt
+          echo "TRIVY_OPENRESTY_STATUS=${trivy_openresty_status}" >> "$GITHUB_ENV"
+          TRIVY_OPENRESTY_CVES="$(grep -oE "CVE-[0-9]{4}-[0-9]{4,}" /tmp/trivy-openresty.txt | sort -u | paste -sd, -)"
+          echo "TRIVY_OPENRESTY_CVES=${TRIVY_OPENRESTY_CVES:-none-found}" >> "$GITHUB_ENV"
+          trivy image --exit-code 0 --severity CRITICAL,HIGH --format json --output /tmp/trivy-openresty.json "${OPENRESTY_IMAGE}" >/dev/null 2>&1 || true
+      - name: Trivy image scan (alpaca-mcp build output)
+        run: |
+          set +e
+          docker image inspect "agent-provost-alpaca-mcp:${TRIVY_BUILD_TAG}" >/dev/null
+          trivy image --exit-code 1 --severity CRITICAL,HIGH "agent-provost-alpaca-mcp:${TRIVY_BUILD_TAG}" > /tmp/trivy-alpaca-mcp.txt 2>&1
+          trivy_alpaca_status=$?
+          cat /tmp/trivy-alpaca-mcp.txt
+          echo "TRIVY_ALPACA_MCP_STATUS=${trivy_alpaca_status}" >> "$GITHUB_ENV"
+          TRIVY_ALPACA_MCP_CVES="$(grep -oE "CVE-[0-9]{4}-[0-9]{4,}" /tmp/trivy-alpaca-mcp.txt | sort -u | paste -sd, -)"
+          echo "TRIVY_ALPACA_MCP_CVES=${TRIVY_ALPACA_MCP_CVES:-none-found}" >> "$GITHUB_ENV"
+          trivy image --exit-code 0 --severity CRITICAL,HIGH --format json --output /tmp/trivy-alpaca-mcp.json "agent-provost-alpaca-mcp:${TRIVY_BUILD_TAG}" >/dev/null 2>&1 || true
+      - name: Trivy image scan (fluent-bit)
+        run: |
+          set +e
+          docker image inspect "${FLUENT_BIT_IMAGE}" >/dev/null
+          trivy image --exit-code 1 --severity CRITICAL,HIGH "${FLUENT_BIT_IMAGE}" > /tmp/trivy-fluent-bit.txt 2>&1
+          trivy_fluent_bit_status=$?
+          cat /tmp/trivy-fluent-bit.txt
+          echo "TRIVY_FLUENT_BIT_STATUS=${trivy_fluent_bit_status}" >> "$GITHUB_ENV"
+          TRIVY_FLUENT_BIT_CVES="$(grep -oE "CVE-[0-9]{4}-[0-9]{4,}" /tmp/trivy-fluent-bit.txt | sort -u | paste -sd, -)"
+          echo "TRIVY_FLUENT_BIT_CVES=${TRIVY_FLUENT_BIT_CVES:-none-found}" >> "$GITHUB_ENV"
+          trivy image --exit-code 0 --severity CRITICAL,HIGH --format json --output /tmp/trivy-fluent-bit.json "${FLUENT_BIT_IMAGE}" >/dev/null 2>&1 || true
+      - name: Fail if any Trivy scan failed
+        run: |
+          JQ_CVE='.Results[]? | .Vulnerabilities[]? | select(.Severity == "HIGH" or .Severity == "CRITICAL") | "  [\(.Severity)] \(.VulnerabilityID)\n    Package: \(.PkgName) \(.InstalledVersion)  Fix: \(.FixedVersion // "no fix available")\n    Title:   \(.Title // ((.Description // "")[0:120]) // "no title")\n    NVD:     https://nvd.nist.gov/vuln/detail/\(.VulnerabilityID)"'
+          # Mock harness images are demo-only and excluded from gate
+          failed=0
+          if [ "${TRIVY_FS_STATUS:-0}" -ne 0 ]; then
+            failed=1
+            echo "::error title=Trivy scan failed::Filesystem scan has HIGH/CRITICAL findings."
+          fi
+          if [ "${TRIVY_OPENRESTY_STATUS:-0}" -ne 0 ]; then
+            echo "::warning title=Trivy advisory::Third-party image ${OPENRESTY_IMAGE} has HIGH/CRITICAL CVEs: ${TRIVY_OPENRESTY_CVES:-unavailable}"
+            if [ -f /tmp/trivy-openresty.json ]; then
+              jq -r "$JQ_CVE" /tmp/trivy-openresty.json 2>/dev/null || true
+            fi
+          fi
+          if [ "${TRIVY_ALPACA_MCP_STATUS:-0}" -ne 0 ]; then
+            failed=1
+            echo "::error title=Trivy scan failed::Image agent-provost-alpaca-mcp:${TRIVY_BUILD_TAG} has HIGH/CRITICAL CVEs: ${TRIVY_ALPACA_MCP_CVES:-unavailable}"
+            if [ -f /tmp/trivy-alpaca-mcp.json ]; then
+              jq -r "$JQ_CVE" /tmp/trivy-alpaca-mcp.json 2>/dev/null || true
+            fi
+          fi
+          if [ "${TRIVY_FLUENT_BIT_STATUS:-0}" -ne 0 ]; then
+            echo "::warning title=Trivy advisory::Third-party image ${FLUENT_BIT_IMAGE} has HIGH/CRITICAL CVEs: ${TRIVY_FLUENT_BIT_CVES:-unavailable}"
+            if [ -f /tmp/trivy-fluent-bit.json ]; then
+              jq -r "$JQ_CVE" /tmp/trivy-fluent-bit.json 2>/dev/null || true
+            fi
+          fi
+          if [ "${failed}" -ne 0 ]; then
+            echo "One or more Trivy scans failed."
+            exit 1
+          fi
+
+  # ── Checkov IaC security scan ──────────────────────────────────────────────
+  security-checkov:
+    name: Checkov (IaC security)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Checkov
+        run: pip install checkov
+      - name: Run Checkov
+        run: checkov --directory . --framework dockerfile,github_actions,yaml --quiet
+
+  # ── Python dependency security scan ─────────────────────────────────────────
+  security-python-audit:
+    name: pip-audit (Python dependencies)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pip-audit
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pip-audit
+      - name: Run pip-audit
+        run: |
+          set -euo pipefail
+          pip-audit --no-deps --disable-pip -r hash-pip/requirements-runtime.txt
+          printf 'alpaca-mcp-server==2.0.1\n' > /tmp/requirements-alpaca-mcp.txt
+          pip-audit --no-deps --disable-pip -r /tmp/requirements-alpaca-mcp.txt
+
+  # ── Secrets detection ──────────────────────────────────────────────────────
+  security-gitleaks:
+    name: Gitleaks (secrets detection)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_arm64.tar.gz \
+            | tar -xz -C /tmp
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+      - name: Run Gitleaks
+        run: gitleaks detect --source . --verbose --config .gitleaks.toml
+
+  # ── Credentials gate (sets output used by integration-tests) ─────────────────
+  check-credentials:
+    name: Check Alpaca credentials
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - id: gate
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        run: |
+          if [ -n "$ALPACA_API_KEY" ] && [ -n "$ALPACA_SECRET_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── Integration tests (requires Alpaca credentials) ────────────────────────
+  integration-tests:
+    name: Integration tests (end-to-end)
+    runs-on: ubuntu-24.04-arm
+    needs: [check-credentials, test-lua, test-shell, build-secure-push-test]
+    if: ${{ always() && needs.check-credentials.outputs.enabled == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+      - name: Fetch latest workflow-updated branch state
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          git fetch origin
+          git reset --hard "origin/${BRANCH}"
+      - name: Authenticate to AWS for ECR Public pulls
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Login to ECR Public
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+      - name: Pre-pull compose images (retry on transient network errors)
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if docker compose --env-file .env.versions pull; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::docker compose pull failed after 5 attempts"
+              exit 1
+            fi
+            echo "::warning::docker compose pull failed (attempt ${attempt}/5); retrying"
+          done
+      - name: Install jq
+        run: sudo apt-get install -y jq
+      - name: Stage real secrets for integration tests
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: "us-east-1"
+          S3_BUCKET: "ap-logs-863750994059-us-east-1-ci-test"
+          VERIFY_S3_BUCKET: "ap-logs-863750994059-us-east-1-ci-test"
+          VERIFY_S3_REGION: "us-east-1"
+          VERIFY_REQUIRE_S3: "true"
+          VERIFY_S3_POLL_SECONDS: "120"
+          S3_KEY_PREFIX: "ci-run-${{ github.run_id }}/"
+          VERIFY_S3_PREFIX: "ci-run-${{ github.run_id }}/"
+        run: |
+          eval "$(sh bootstrap.sh runner)"
+          {
+            echo "PROVOST_SECRETS_DIR=$PROVOST_SECRETS_DIR"
+            echo "S3_BUCKET=ap-logs-863750994059-us-east-1-ci-test"
+            echo "S3_KEY_PREFIX=ci-run-${GITHUB_RUN_ID}/"
+            echo "VERIFY_S3_BUCKET=ap-logs-863750994059-us-east-1-ci-test"
+            echo "VERIFY_S3_REGION=us-east-1"
+            echo "VERIFY_S3_PREFIX=ci-run-${GITHUB_RUN_ID}/"
+            echo "VERIFY_REQUIRE_S3=true"
+          } >> "$GITHUB_ENV"
+
+          echo "=== Fixing Secret Permissions ==="
+          chmod -R 755 "$PROVOST_SECRETS_DIR"
+          ls -la "$PROVOST_SECRETS_DIR"
+      - name: Ensure local dirs for bind mounts
+        run: |
+          mkdir -p logs/fluent-bit-storage/final
+          chmod -R a+rwx logs/fluent-bit-storage
+      - name: Run Integration Tests
+        env:
+          BOOTSTRAP_MODE: runner
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          S3_BUCKET: "ap-logs-863750994059-us-east-1-ci-test"
+          S3_KEY_PREFIX: "ci-run-${{ github.run_id }}/"
+          VERIFY_S3_BUCKET: "ap-logs-863750994059-us-east-1-ci-test"
+          VERIFY_S3_REGION: "us-east-1"
+          VERIFY_S3_PREFIX: "ci-run-${{ github.run_id }}/"
+          VERIFY_REQUIRE_S3: "true"
+          VERIFY_S3_POLL_SECONDS: "120"
+          PROVOST_VERIFY_SKIP_EVIDENCE_CHECK: "false"
+          PROVOST_VERIFY_ALLOW_MCP_PROBE_FAILURE: "false"
+        run: ./verify_proxy_routing.sh
+      - name: Run forbidden endpoint test
+        env:
+          BOOTSTRAP_MODE: runner
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          eval "$(sh bootstrap.sh runner)"
+          PROVOST_TOKEN="$(tr -d '\r\n' < "$PROVOST_SECRETS_DIR/provost_token")"
+          export PROVOST_TOKEN
+          ./tests/test_forbidden_endpoints.sh
+      - name: Debug Container State
+        if: always()
+        run: |
+          echo "=== Docker Compose PS ==="
+          docker compose --env-file .env.versions ps -a
+
+          echo "=== Docker Inspect: agent-provost ==="
+          docker inspect agent-provost || true
+
+          echo "=== Docker Inspect: alpaca-mcp ==="
+          docker inspect alpaca-mcp || true
+
+          echo "=== Docker Inspect: fluent-bit ==="
+          docker inspect fluent-bit || true
+
+          echo "=== Full Docker Compose Logs ==="
+          docker compose --env-file .env.versions logs
+      - name: Generate Error Log, Download from S3, and Validate Schema
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: "us-east-1"
+          S3_KEY_PREFIX: "ci-run-${{ github.run_id }}/"
+        run: |
+          set -euo pipefail
+          echo "=== Forcing an Error Log ==="
+
+          status_file=/tmp/error_curl_status.txt
+          body_file=/tmp/error_curl_body.txt
+          verbose_file=/tmp/error_curl_verbose.txt
+
+          curl -sv -o "$body_file" -w '%{http_code}\n' http://localhost:8088/this-does-not-exist >"$status_file" 2>"$verbose_file" || true
+
+          echo "--- curl verbose ---"
+          cat "$verbose_file" || true
+          echo "--- curl status ---"
+          cat "$status_file" || true
+          echo "--- curl body ---"
+          cat "$body_file" || true
+
+          echo "=== Waiting for Fluent Bit S3 Upload ==="
+          sleep 15
+
+          echo "=== Fluent Bit Post-Traffic Logs ==="
+          docker logs fluent-bit | tail -n 50 || true
+
+          echo "=== S3 Contents For Current Run Prefix ==="
+          aws s3 ls "s3://ap-logs-863750994059-us-east-1-ci-test/${S3_KEY_PREFIX}" --recursive || true
+
+          echo "=== Downloading Logs from CI S3 Bucket ==="
+          mkdir -p downloaded-logs
+          aws s3 sync "s3://ap-logs-863750994059-us-east-1-ci-test/${S3_KEY_PREFIX}agent-provost/logs/access/" downloaded-logs/access/ || true
+          aws s3 sync "s3://ap-logs-863750994059-us-east-1-ci-test/${S3_KEY_PREFIX}agent-provost/logs/error/" downloaded-logs/error/ || true
+
+          echo "=== Downloaded Files ==="
+          find downloaded-logs -type f -exec ls -lh {} + || true
+
+          echo "=== Raw Log Contents ==="
+          find downloaded-logs -type f -exec cat {} + || true
+
+          echo "=== Installing Validator ==="
+          python3 -m venv /tmp/schema-venv
+          /tmp/schema-venv/bin/pip install --quiet jsonschema
+          export PATH="/tmp/schema-venv/bin:$PATH"
+          cat >/tmp/validate_jsonl.py <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          from jsonschema import Draft7Validator
+
+          schema_path = Path(sys.argv[1])
+          file_path = Path(sys.argv[2])
+          schema = json.loads(schema_path.read_text())
+          validator = Draft7Validator(schema)
+
+          with file_path.open() as fh:
+              for line_no, line in enumerate(fh, 1):
+                  line = line.strip()
+                  if not line:
+                      continue
+                  instance = json.loads(line)
+                  errors = sorted(validator.iter_errors(instance), key=lambda err: err.path)
+                  if errors:
+                      first = errors[0]
+                      raise SystemExit(
+                          f"Schema validation failed for {file_path} line {line_no}: {first.message}"
+                      )
+          PY
+
+          echo "=== Validating Access Logs ==="
+          ACCESS_LOGS=$(find downloaded-logs -type f -path "*/access/*")
+          if [ -z "$ACCESS_LOGS" ]; then
+            echo "❌ ERROR: No access logs found in S3!"
+            exit 1
+          fi
+          for file in $ACCESS_LOGS; do
+            echo "Checking $file..."
+            python /tmp/validate_jsonl.py schemas/access_log_schema.json "$file"
+          done
+
+          echo "=== Validating Error Logs ==="
+          ERROR_LOGS=$(find downloaded-logs -type f -path "*/error/*")
+          if [ -z "$ERROR_LOGS" ]; then
+            echo "⚠️  No error logs found in S3; continuing because the access-log schema check is the gate for this run."
+          else
+            for file in $ERROR_LOGS; do
+              echo "Checking $file..."
+              python /tmp/validate_jsonl.py schemas/error_log_schema.json "$file"
+            done
+          fi
+      - name: Capture container logs on failure
+        if: failure()
+        run: |
+          echo "=== fluent-bit logs ==="
+          docker logs fluent-bit 2>&1 || true
+          echo "=== agent-provost logs ==="
+          docker logs agent-provost 2>&1 || true
+          echo "=== compose ps ==="
+          docker compose --env-file .env.versions ps -a || true
+      - name: Tear down compose stack
+        if: always()
+        run: docker compose --env-file .env.versions down -v --remove-orphans || true
+
+  # ── Build → Secure → Push → Test (ECR Public) ─────────────────────────────
+  build-secure-push-test:
+    name: Build -> Secure -> Push -> Test (ECR Public)
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect image content changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          base=""
+          head="${GITHUB_SHA}"
+
+          if [ "${EVENT_NAME}" = "push" ]; then
+            base="${PUSH_BEFORE}"
+          elif [ "${EVENT_NAME}" = "pull_request" ]; then
+            base="${PR_BASE_SHA}"
+            head="${PR_HEAD_SHA}"
+          fi
+
+          if [ -z "${base}" ] || [ "${base}" = "0000000000000000000000000000000000000000" ]; then
+            echo "IMAGE_CHANGED=true" >> "$GITHUB_ENV"
+            echo "Detected initial/unknown diff range; forcing image push."
+            exit 0
+          fi
+
+          changed_files="$(git diff --name-only "${base}" "${head}" || true)"
+          echo "Changed files:"
+          printf '%s\n' "${changed_files}"
+
+          if printf '%s\n' "${changed_files}" | grep -Eq '^(alpaca-mcp\.Dockerfile|hash-pip/requirements-runtime\.txt|\.env\.versions)$'; then
+            echo "IMAGE_CHANGED=true" >> "$GITHUB_ENV"
+            echo "Image-defining files changed; build/push enabled."
+          else
+            echo "IMAGE_CHANGED=false" >> "$GITHUB_ENV"
+            echo "Image-defining files unchanged; build/push skipped."
+          fi
+      - name: Skip push when image inputs are unchanged
+        if: env.IMAGE_CHANGED != 'true'
+        run: echo "No image-defining changes detected; skipping ECR push."
+      - name: Set image tags
+        if: env.IMAGE_CHANGED == 'true'
+        run: echo "IMAGE_SHA_TAG=${GITHUB_SHA}" >> "$GITHUB_ENV"
+      - name: Load image versions from .env.versions
+        if: env.IMAGE_CHANGED == 'true'
+        run: grep -v '^#' .env.versions | grep -v '^$' >> "$GITHUB_ENV"
+      - name: Stage dummy secrets for build
+        if: env.IMAGE_CHANGED == 'true'
+        run: |
+          eval "$(sh bootstrap.sh runner)"
+      - name: Assert AWS credentials are configured
+        if: env.IMAGE_CHANGED == 'true'
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] || [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "::error::AWS credentials are required to push updated images to ECR."
+            exit 1
+          fi
+      - name: Step 1 (Build)
+        if: env.IMAGE_CHANGED == 'true'
+        run: |
+          set -euo pipefail
+          docker build -f alpaca-mcp.Dockerfile \
+            --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" \
+            -t public.ecr.aws/e2u9m9o7/agent-provost:latest \
+            -t public.ecr.aws/e2u9m9o7/agent-provost:"${IMAGE_SHA_TAG}" .
+      - name: Step 2 (Authenticate to AWS)
+        if: env.IMAGE_CHANGED == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Step 3 (Login to Public ECR)
+        if: env.IMAGE_CHANGED == 'true'
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+      - name: Step 4 (Login & Push to ECR) - Push tags
+        if: env.IMAGE_CHANGED == 'true'
+        run: |
+          set -euo pipefail
+          docker push public.ecr.aws/e2u9m9o7/agent-provost:latest
+          docker push public.ecr.aws/e2u9m9o7/agent-provost:"${IMAGE_SHA_TAG}"
+      - name: Step 4b (Pin immutable digest in .env.versions)
+        if: env.IMAGE_CHANGED == 'true'
+        run: |
+          set -euo pipefail
+          REPOSITORY_NAME="${ALPACA_IMAGE##*/}"
+          ECR_DIGEST=""
+          for attempt in $(seq 1 12); do
+            ECR_DIGEST="$(aws ecr-public describe-images \
+              --region us-east-1 \
+              --repository-name "${REPOSITORY_NAME}" \
+              --image-ids imageTag="${IMAGE_SHA_TAG}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text 2>/dev/null || true)"
+            if echo "${ECR_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
+              break
+            fi
+            echo "Digest not yet available for ${REPOSITORY_NAME}:${IMAGE_SHA_TAG} (attempt ${attempt}/12)"
+            sleep 5
+          done
+
+          if ! echo "${ECR_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
+            echo "::error::Failed to resolve ECR digest for ${REPOSITORY_NAME}:${IMAGE_SHA_TAG}"
+            exit 1
+          fi
+
+          sed -i "s|^ALPACA_IMAGE_TAG=.*|ALPACA_IMAGE_TAG=${ECR_DIGEST}|" .env.versions
+      - name: Step 4c (Commit pinned digest back to branch)
+        if: env.IMAGE_CHANGED == 'true'
+        continue-on-error: true
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "ci: pin ALPACA_IMAGE_TAG to ECR digest [skip ci]"
+          file_pattern: .env.versions
+      - name: Step 5 (Sanity/Integration Tests)
+        if: env.IMAGE_CHANGED == 'true'
+        run: |
+          set -euo pipefail
+          export ALPACA_API_KEY="dummy"
+          export ALPACA_SECRET_KEY="dummy"
+          mkdir -p logs/fluent-bit-storage
+           chmod -R a+rwx logs/fluent-bit-storage
+          docker compose --env-file .env.versions up -d
+          sudo apt-get update -q
+          sudo apt-get install -y bats
+          bats tests/shell/
+      - name: Capture fluent-bit logs on failure
+        if: failure() && env.IMAGE_CHANGED == 'true'
+        run: docker logs fluent-bit 2>&1 || true
+      - name: Tear down compose stack
+        if: always() && env.IMAGE_CHANGED == 'true'
+        run: docker compose --env-file .env.versions down -v --remove-orphans
