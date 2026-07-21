@@ -167,7 +167,7 @@ services:
       OPENID_CALLBACK_URL: "${OPENID_CALLBACK_URL:-/oauth/openid/callback}"
       OPENID_SESSION_SECRET: "${OPENID_SESSION_SECRET:-change-this-to-a-random-string}"
       OPENID_SCOPE: "openid profile email"
-      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      #OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OPENAI_REVERSE_PROXY: "${OPENAI_REVERSE_PROXY:-}"
       MCP_ALLOWED_DOMAINS: "http://llm-provost:8000"
     volumes:
