@@ -111,4 +111,24 @@ function _M.is_inbound_request_rate_exceeded(rules, client_key)
     return current > rpm, rpm
 end
 
+function _M.is_tool_rate_exceeded(tool_name, user_id, max_calls, window_seconds)
+    local limit = to_number(max_calls)
+    local window_size = to_number(window_seconds)
+    if not limit or limit <= 0 or not window_size or window_size <= 0 then
+        return false
+    end
+
+    local tool = type(tool_name) == "string" and tool_name or "unknown"
+    local user = type(user_id) == "string" and user_id or "anonymous"
+    local window = math.floor(ngx.now() / window_size)
+    local key = "tool_rate:" .. user .. ":" .. tool .. ":" .. window
+    local current, err = dict():incr(key, 1, 0, window_size + 1)
+    if not current then
+        ngx.log(ngx.ERR, "[rate_limit] failed to increment tool counter: ", err or "unknown")
+        return true
+    end
+
+    return current > limit
+end
+
 return _M

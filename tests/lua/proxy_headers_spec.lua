@@ -1,87 +1,41 @@
--- proxy_headers_spec.lua
--- Validates that the proxy header and routing directives are present and
--- correct inside default.conf without needing a live nginx instance.
-
-describe("proxy headers and routing (default.conf)", function()
-
+describe("Phase 2 routing and audit configuration", function()
     local conf
 
     before_each(function()
-        local f = io.open("default.conf", "r")
-        assert.is_not_nil(f, "default.conf must be readable from the repo root")
-        conf = f:read("*a")
-        f:close()
+        local file = assert(io.open("default.conf", "r"))
+        conf = file:read("*a")
+        file:close()
     end)
 
-    -- llm-to-mcp outbound headers
-    it("llm-to-mcp forwards the Host header from $host", function()
-        assert.truthy(conf:find("proxy_set_header Host %$host", 1, false))
+    it("declares the Phase 2 environment variables", function()
+        assert.truthy(conf:find("env LLM_API_URL;", 1, true))
+        assert.truthy(conf:find("env LLM_API_KEY;", 1, true))
+        assert.truthy(conf:find("env MCP_ROUTING_TABLE_PATH;", 1, true))
     end)
 
-    it("llm-to-mcp forwards X-Real-IP from $remote_addr", function()
-        assert.truthy(conf:find("proxy_set_header X%-Real%-IP %$remote_addr", 1, false))
+    it("defines chat and MCP paths", function()
+        assert.truthy(conf:find("location = /v1/chat/completions", 1, true))
+        assert.truthy(conf:find("location ~ ^/mcp/(.+)$", 1, true))
+        assert.truthy(conf:find("content_by_lua_file /etc/nginx/lua/mcp_proxy.lua;", 1, true))
     end)
 
-    it("llm-to-mcp proxies upstream to mcp-server on port 8088", function()
-        assert.truthy(conf:find("proxy_pass http://mcp%-server:8088", 1, false))
+    it("runs policy and audit phases on both paths", function()
+        local _, policy_count = conf:gsub("access_by_lua_file /etc/nginx/lua/http_policy.lua;", "")
+        local _, audit_count = conf:gsub("log_by_lua_file /etc/nginx/lua/audit_error.lua;", "")
+        assert.equals(2, policy_count)
+        assert.equals(2, audit_count)
     end)
 
-    -- SSE / streaming settings on llm-to-mcp
-    it("llm-to-mcp disables proxy buffering for SSE streaming", function()
-        assert.truthy(conf:find("proxy_buffering off", 1, false))
+    it("records all four identity layers", function()
+        assert.truthy(conf:find('"user_id":"$provost_user_id"', 1, true))
+        assert.truthy(conf:find('"customer_id":"$provost_customer_id"', 1, true))
+        assert.truthy(conf:find('"conversation_id":"$provost_conversation_id"', 1, true))
+        assert.truthy(conf:find('"request_id":"$request_id"', 1, true))
     end)
 
-    it("llm-to-mcp uses HTTP/1.1 for keep-alive upstream connections", function()
-        assert.truthy(conf:find("proxy_http_version 1.1", 1, false))
+    it("does not include credentials in the log format", function()
+        local format = conf:match("log_format main_json.-'}';") or ""
+        assert.falsy(format:lower():find("authorization", 1, true))
+        assert.falsy(format:lower():find("token", 1, true))
     end)
-
-    -- mcp-to-api upstream routing
-    it("mcp-to-api /trading/ route proxies to the paper upstream", function()
-        assert.truthy(conf:find("proxy_pass https://paper%-api%." .. "alpa" .. "ca%.markets", 1, false))
-    end)
-
-    it("mcp-to-api /data/ route proxies to the data upstream", function()
-        assert.truthy(conf:find("proxy_pass https://data%." .. "alpa" .. "ca%.markets", 1, false))
-    end)
-
-    it("mcp-to-api /broker/ route proxies to the broker upstream", function()
-        assert.truthy(conf:find("proxy_pass https://broker%-api%." .. "alpa" .. "ca%.markets", 1, false))
-    end)
-
-    -- TLS SNI on mcp-to-api
-    it("mcp-to-api enables SSL SNI for upstream TLS handshake", function()
-        assert.truthy(conf:find("proxy_ssl_server_name on", 1, false))
-    end)
-
-    -- Log format
-    it("uses json_full log format for the audit ledger", function()
-        assert.truthy(conf:find("log_format json_full", 1, false))
-    end)
-
-    it("records request body in the log format", function()
-        assert.truthy(conf:find('"request_body"', 1, false))
-    end)
-
-    it("records response body in the log format", function()
-        assert.truthy(conf:find('"resp_body"', 1, false))
-    end)
-
-    it("records provost user in the log format", function()
-        assert.truthy(conf:find('"provost_user"', 1, false))
-    end)
-
-    it("records provost machine in the log format", function()
-        assert.truthy(conf:find('"provost_machine"', 1, false))
-    end)
-
-    it("enforces the inbound provost token", function()
-        assert.truthy(conf:find("MISSING_PROVOST_TOKEN", 1, true))
-        assert.truthy(conf:find("INVALID_PROVOST_TOKEN", 1, true))
-    end)
-
-    it("requires inbound user and machine identity headers", function()
-        assert.truthy(conf:find("MISSING_PROVOST_USER", 1, true))
-        assert.truthy(conf:find("MISSING_PROVOST_MACHINE", 1, true))
-    end)
-
 end)

@@ -10,11 +10,6 @@ services:
       - /etc/localtime:/etc/localtime:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     environment:
-      MCP_API_URL: "http://llm-provost:8081/trading"
-      MCP_DATA_URL: "http://llm-provost:8081/data"
-      MCP_BROKER_URL: "http://llm-provost:8081/broker"
-      MCP_API_KEY: ${MCP_API_KEY:-}
-      MCP_SECRET_KEY: ${MCP_SECRET_KEY:-}
       TZ: ${TZ:-Asia/Jerusalem}
     expose:
       - "8088"
@@ -86,10 +81,15 @@ services:
       - ./default.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./lua:/etc/nginx/lua:ro
       - ./rules.json:/etc/rules.json:ro
+      - ./mcp_routes.json:/etc/nginx/mcp_routes.json:ro
       - ${PROVOST_SECRETS_DIR:-./.secrets}:/run/secrets:ro
       - provost_run:/var/run/provost
       - /etc/localtime:/etc/localtime:ro
     environment:
+      LLM_API_URL: ${LLM_API_URL:-https://api.openai.com}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      MCP_ROUTING_TABLE_PATH: /etc/nginx/mcp_routes.json
+      PROVOST_TOKEN: ${PROVOST_TOKEN:-}
       TZ: ${TZ:-Asia/Jerusalem}
     networks:
       - mcp_internal

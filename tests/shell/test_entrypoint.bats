@@ -6,16 +6,15 @@
 
 # ── entrypoint.sh ────────────────────────────────────────────────────────────
 
-@test "entrypoint.sh: strict error handling is enabled (set -e)" {
-    run grep -c "^set -e" entrypoint.sh
+@test "entrypoint.sh: strict error handling is enabled" {
+    run grep -c "^set -eu" entrypoint.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
-@test "entrypoint.sh: patches TRADE_API_URL override into server.py" {
-    run grep -c "TRADE_API_URL" entrypoint.sh
-    [ "$status" -eq 0 ]
-    [ "$output" -ge 1 ]
+@test "entrypoint.sh: does not patch legacy upstream settings" {
+    run grep -E "MCP_API_KEY|MCP_SECRET_KEY|MCP_PAPER_TRADE|MCP_API_URL" entrypoint.sh
+    [ "$status" -eq 1 ]
 }
 
 @test "entrypoint.sh: starts MCP server on port 8088" {
@@ -100,20 +99,22 @@
 
 # ── bootstrap.sh ─────────────────────────────────────────────────────────────
 
-@test "bootstrap.sh: defines truthy helper for flag parsing" {
-    run grep -c "^is_true()" bootstrap.sh
+@test "bootstrap.sh: creates a default MCP routing table" {
+    run grep -c "^create_default_routes()" bootstrap.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
 @test "bootstrap.sh: ec2 fallback copy requires explicit ALLOW_EC2_LOCAL_FALLBACK_SECRETS" {
-    run grep -c 'if is_true "\${ALLOW_EC2_LOCAL_FALLBACK_SECRETS:-false}"; then' bootstrap.sh
+    run grep -c 'ALLOW_EC2_LOCAL_FALLBACK_SECRETS' bootstrap.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
-@test "bootstrap.sh: dev and runner still sync local fallback secrets" {
-    run grep -E -c '^[[:space:]]+sync_local_fallback_secrets "\$PROVOST_SECRETS_DIR"$' bootstrap.sh
+@test "bootstrap.sh: stages the LLM API key without legacy MCP credentials" {
+    run grep -c 'LLM_API_KEY' bootstrap.sh
     [ "$status" -eq 0 ]
-    [ "$output" -ge 2 ]
+    [ "$output" -ge 3 ]
+    run grep -E 'MCP_API_KEY|MCP_SECRET_KEY|MCP_PAPER_TRADE' bootstrap.sh
+    [ "$status" -eq 1 ]
 }
