@@ -173,7 +173,7 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             echo "::warning::Initial compose startup failed; collecting diagnostics and retrying once"
             docker compose --env-file .env.versions ps -a || true
-            docker compose --env-file .env.versions logs --tail 120 fluent-bit agent-provost alpaca-mcp || true
+            docker compose --env-file .env.versions logs --tail 120 fluent-bit llm-provost alpaca-mcp || true
             docker compose --env-file .env.versions down -v --remove-orphans || true
             docker compose --env-file .env.versions pull
             docker compose --env-file .env.versions up -d
@@ -183,7 +183,7 @@ jobs:
           set -euo pipefail
           docker compose --env-file .env.versions ps
           [ "$(docker inspect -f '{{.State.Status}}' alpaca-mcp)" = "running" ]
-          [ "$(docker inspect -f '{{.State.Status}}' agent-provost)" = "running" ]
+          [ "$(docker inspect -f '{{.State.Status}}' llm-provost)" = "running" ]
           [ "$(docker inspect -f '{{.State.Health.Status}}' fluent-bit)" = "healthy" ]
       - name: Tear down compose stack
         if: always()
@@ -240,7 +240,7 @@ jobs:
       - name: Pull and build images for scan
         run: |
           set -euo pipefail
-          docker compose --env-file .env.versions -f docker-compose.yml pull agent-provost
+          docker compose --env-file .env.versions -f docker-compose.yml pull llm-provost
           for attempt in 1 2 3 4 5; do
             if docker pull "${FLUENT_BIT_IMAGE}"; then
               break
@@ -252,8 +252,8 @@ jobs:
             echo "::warning::docker pull ${FLUENT_BIT_IMAGE} failed (attempt ${attempt}/5); retrying"
             sleep 5
           done
-          docker build -f alpaca-mcp.Dockerfile --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" -t agent-provost-alpaca-mcp:"${TRIVY_BUILD_TAG}" .
-      - name: Trivy image scan (agent-provost)
+          docker build -f alpaca-mcp.Dockerfile --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" -t llm-provost-alpaca-mcp:"${TRIVY_BUILD_TAG}" .
+      - name: Trivy image scan (llm-provost)
         run: |
           set +e
           trivy image --exit-code 1 --severity CRITICAL,HIGH "${OPENRESTY_IMAGE}" > /tmp/trivy-openresty.txt 2>&1
@@ -266,14 +266,14 @@ jobs:
       - name: Trivy image scan (alpaca-mcp build output)
         run: |
           set +e
-          docker image inspect "agent-provost-alpaca-mcp:${TRIVY_BUILD_TAG}" >/dev/null
-          trivy image --exit-code 1 --severity CRITICAL,HIGH "agent-provost-alpaca-mcp:${TRIVY_BUILD_TAG}" > /tmp/trivy-alpaca-mcp.txt 2>&1
+          docker image inspect "llm-provost-alpaca-mcp:${TRIVY_BUILD_TAG}" >/dev/null
+          trivy image --exit-code 1 --severity CRITICAL,HIGH "llm-provost-alpaca-mcp:${TRIVY_BUILD_TAG}" > /tmp/trivy-alpaca-mcp.txt 2>&1
           trivy_alpaca_status=$?
           cat /tmp/trivy-alpaca-mcp.txt
           echo "TRIVY_ALPACA_MCP_STATUS=${trivy_alpaca_status}" >> "$GITHUB_ENV"
           TRIVY_ALPACA_MCP_CVES="$(grep -oE "CVE-[0-9]{4}-[0-9]{4,}" /tmp/trivy-alpaca-mcp.txt | sort -u | paste -sd, -)"
           echo "TRIVY_ALPACA_MCP_CVES=${TRIVY_ALPACA_MCP_CVES:-none-found}" >> "$GITHUB_ENV"
-          trivy image --exit-code 0 --severity CRITICAL,HIGH --format json --output /tmp/trivy-alpaca-mcp.json "agent-provost-alpaca-mcp:${TRIVY_BUILD_TAG}" >/dev/null 2>&1 || true
+          trivy image --exit-code 0 --severity CRITICAL,HIGH --format json --output /tmp/trivy-alpaca-mcp.json "llm-provost-alpaca-mcp:${TRIVY_BUILD_TAG}" >/dev/null 2>&1 || true
       - name: Trivy image scan (fluent-bit)
         run: |
           set +e
@@ -302,7 +302,7 @@ jobs:
           fi
           if [ "${TRIVY_ALPACA_MCP_STATUS:-0}" -ne 0 ]; then
             failed=1
-            echo "::error title=Trivy scan failed::Image agent-provost-alpaca-mcp:${TRIVY_BUILD_TAG} has HIGH/CRITICAL CVEs: ${TRIVY_ALPACA_MCP_CVES:-unavailable}"
+            echo "::error title=Trivy scan failed::Image llm-provost-alpaca-mcp:${TRIVY_BUILD_TAG} has HIGH/CRITICAL CVEs: ${TRIVY_ALPACA_MCP_CVES:-unavailable}"
             if [ -f /tmp/trivy-alpaca-mcp.json ]; then
               jq -r "$JQ_CVE" /tmp/trivy-alpaca-mcp.json 2>/dev/null || true
             fi
@@ -486,8 +486,8 @@ jobs:
           echo "=== Docker Compose PS ==="
           docker compose --env-file .env.versions ps -a
 
-          echo "=== Docker Inspect: agent-provost ==="
-          docker inspect agent-provost || true
+          echo "=== Docker Inspect: llm-provost ==="
+          docker inspect llm-provost || true
 
           echo "=== Docker Inspect: alpaca-mcp ==="
           docker inspect alpaca-mcp || true
@@ -531,8 +531,8 @@ jobs:
 
           echo "=== Downloading Logs from CI S3 Bucket ==="
           mkdir -p downloaded-logs
-          aws s3 sync "s3://ap-logs-863750994059-us-east-1-ci-test/${S3_KEY_PREFIX}agent-provost/logs/access/" downloaded-logs/access/ || true
-          aws s3 sync "s3://ap-logs-863750994059-us-east-1-ci-test/${S3_KEY_PREFIX}agent-provost/logs/error/" downloaded-logs/error/ || true
+          aws s3 sync "s3://ap-logs-863750994059-us-east-1-ci-test/${S3_KEY_PREFIX}llm-provost/logs/access/" downloaded-logs/access/ || true
+          aws s3 sync "s3://ap-logs-863750994059-us-east-1-ci-test/${S3_KEY_PREFIX}llm-provost/logs/error/" downloaded-logs/error/ || true
 
           echo "=== Downloaded Files ==="
           find downloaded-logs -type f -exec ls -lh {} + || true
@@ -595,8 +595,8 @@ jobs:
         run: |
           echo "=== fluent-bit logs ==="
           docker logs fluent-bit 2>&1 || true
-          echo "=== agent-provost logs ==="
-          docker logs agent-provost 2>&1 || true
+          echo "=== llm-provost logs ==="
+          docker logs llm-provost 2>&1 || true
           echo "=== compose ps ==="
           docker compose --env-file .env.versions ps -a || true
       - name: Tear down compose stack
@@ -676,8 +676,8 @@ jobs:
           set -euo pipefail
           docker build -f alpaca-mcp.Dockerfile \
             --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" \
-            -t public.ecr.aws/e2u9m9o7/agent-provost:latest \
-            -t public.ecr.aws/e2u9m9o7/agent-provost:"${IMAGE_SHA_TAG}" .
+            -t public.ecr.aws/e2u9m9o7/llm-provost:latest \
+            -t public.ecr.aws/e2u9m9o7/llm-provost:"${IMAGE_SHA_TAG}" .
       - name: Step 2 (Authenticate to AWS)
         if: env.IMAGE_CHANGED == 'true'
         uses: aws-actions/configure-aws-credentials@v4
@@ -694,8 +694,8 @@ jobs:
         if: env.IMAGE_CHANGED == 'true'
         run: |
           set -euo pipefail
-          docker push public.ecr.aws/e2u9m9o7/agent-provost:latest
-          docker push public.ecr.aws/e2u9m9o7/agent-provost:"${IMAGE_SHA_TAG}"
+          docker push public.ecr.aws/e2u9m9o7/llm-provost:latest
+          docker push public.ecr.aws/e2u9m9o7/llm-provost:"${IMAGE_SHA_TAG}"
       - name: Step 4b (Pin immutable digest in .env.versions)
         if: env.IMAGE_CHANGED == 'true'
         run: |

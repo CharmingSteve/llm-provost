@@ -1,6 +1,6 @@
 services:
   alpaca-mcp:
-    # Alpaca image is built with docker build and pushed to ECR. Digest is sourced from .env.versions via: docker compose --env-file .env.versions. It is built from the alpace-mcp.Dockerfile in the root of this repo.
+    # LLM Provost MCP image is built with docker build and pushed to ECR. Digest is sourced from .env.versions via: docker compose --env-file .env.versions. It is built from the alpaca-mcp.Dockerfile in the root of this repo.
     image: ${ALPACA_IMAGE}@${ALPACA_IMAGE_TAG}
     pull_policy: if_not_present
     container_name: alpaca-mcp
@@ -10,9 +10,9 @@ services:
       - /etc/localtime:/etc/localtime:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     environment:
-      TRADE_API_URL: "http://agent-provost:8081/trading"
-      DATA_API_URL: "http://agent-provost:8081/data"
-      BROKER_API_URL: "http://agent-provost:8081/broker"
+      TRADE_API_URL: "http://llm-provost:8081/trading"
+      DATA_API_URL: "http://llm-provost:8081/data"
+      BROKER_API_URL: "http://llm-provost:8081/broker"
       ALPACA_API_KEY: ${ALPACA_API_KEY:-}
       ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
       TZ: ${TZ:-Asia/Jerusalem}
@@ -45,7 +45,7 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
-      S3_BUCKET: ${S3_BUCKET:-agent-provost-local}
+      S3_BUCKET: ${S3_BUCKET:-llm-provost-local}
       S3_KEY_PREFIX: ${S3_KEY_PREFIX:-}
       INSTANCE_ID: ${INSTANCE_ID:-local-dev}
       TZ: ${TZ:-Asia/Jerusalem}
@@ -68,11 +68,11 @@ services:
       - /tmp
     pids_limit: 256
     restart: unless-stopped
-  agent-provost:
-    # Agent Provost image  is the public Openresty image with a custom entrypoint script that runs the rules. Digest is sourced from .env.versions via: docker compose --env-file .env.versions. It is  Digest is sourced from .env.versions via: docker compose --env-file .env.versions 
+  llm-provost:
+    # LLM Provost image is the public OpenResty image with a custom entrypoint script that runs the rules. Digest is sourced from .env.versions via: docker compose --env-file .env.versions.
     image: ${OPENRESTY_IMAGE}
     pull_policy: if_not_present
-    container_name: agent-provost
+    container_name: llm-provost
     depends_on:
       alpaca-mcp:
         condition: service_started

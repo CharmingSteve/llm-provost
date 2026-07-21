@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-git config --global --add safe.directory /opt/agent-provost
+git config --global --add safe.directory /opt/llm-provost
 
 # Ensure we are in the repo root
 if [ ! -f "bootstrap.sh" ]; then
@@ -74,7 +74,7 @@ git pull origin "$BRANCH_NAME"
 
 echo "[upgrade] Re-staging bootstrap runtime/secrets"
 # Auto-detect environment
-if [[ -d /opt/agent-provost ]]; then
+if [[ -d /opt/llm-provost ]]; then
     BOOTSTRAP_MODE="ec2"
 else
     BOOTSTRAP_MODE="dev"

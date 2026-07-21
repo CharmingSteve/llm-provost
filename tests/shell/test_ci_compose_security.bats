@@ -46,7 +46,7 @@
   [ "$status" -eq 0 ]
   run grep -E '^\s*AWS_SESSION_TOKEN:\s*\$\{AWS_SESSION_TOKEN:-\}$' docker-compose.yml
   [ "$status" -eq 0 ]
-  run grep -E '^\s*S3_BUCKET:\s*\$\{S3_BUCKET:-agent-provost-local\}$' docker-compose.yml
+  run grep -E '^\s*S3_BUCKET:\s*\$\{S3_BUCKET:-llm-provost-local\}$' docker-compose.yml
   [ "$status" -eq 0 ]
 }
 
@@ -143,9 +143,9 @@
 @test "CI scans built alpaca-mcp image" {
   run grep -E 'TRIVY_BUILD_TAG=\$\(git rev-parse --short=7 HEAD\)' .github/workflows/ci.yml
   [ "$status" -eq 0 ]
-  run grep -E 'docker image inspect "agent-provost-alpaca-mcp:\$\{TRIVY_BUILD_TAG\}" >/dev/null' .github/workflows/ci.yml
+  run grep -E 'docker image inspect "llm-provost-alpaca-mcp:\$\{TRIVY_BUILD_TAG\}" >/dev/null' .github/workflows/ci.yml
   [ "$status" -eq 0 ]
-  run grep -E 'trivy image --exit-code 1 --severity CRITICAL,HIGH "agent-provost-alpaca-mcp:\$\{TRIVY_BUILD_TAG\}"' .github/workflows/ci.yml
+  run grep -E 'trivy image --exit-code 1 --severity CRITICAL,HIGH "llm-provost-alpaca-mcp:\$\{TRIVY_BUILD_TAG\}"' .github/workflows/ci.yml
   [ "$status" -eq 0 ]
 }
 
@@ -214,7 +214,7 @@
 }
 
 @test ".env.versions defines ALPACA_IMAGE" {
-  run grep -E '^ALPACA_IMAGE=public\.ecr\.aws/e2u9m9o7/agent-provost$' .env.versions
+  run grep -E '^ALPACA_IMAGE=public\.ecr\.aws/e2u9m9o7/llm-provost$' .env.versions
   [ "$status" -eq 0 ]
 }
 

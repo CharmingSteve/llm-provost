@@ -1,5 +1,5 @@
 -- rules_engine.lua
--- Pure rule evaluation module for Agent Provost.
+-- Pure rule evaluation module for LLM Provost.
 --
 -- Checks a decoded MCP request body against a rules table sourced from
 -- lua_shared_dict (populated by rule_loader.lua). This module has no I/O

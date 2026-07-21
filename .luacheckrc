@@ -1,5 +1,5 @@
 -- .luacheckrc
--- luacheck configuration for the agent-provost repository.
+-- luacheck configuration for the llm-provost repository.
 -- OpenResty injects these globals at runtime; declare them here so luacheck
 -- does not flag them as undefined when linting test files.
 

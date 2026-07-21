@@ -14,7 +14,7 @@ setup() {
   cat > "$TMPDIR/bin/docker" <<'EOF'
 #!/bin/sh
 if [ "$1" = "inspect" ]; then
-  if [ "$4" = "agent-provost" ]; then
+  if [ "$4" = "llm-provost" ]; then
     echo "running"
   else
     echo "healthy"
@@ -65,7 +65,7 @@ EOF
   cat > "$TMPDIR/bin/docker" <<'EOF'
 #!/bin/sh
 if [ "$1" = "inspect" ]; then
-  if [ "$4" = "agent-provost" ]; then
+  if [ "$4" = "llm-provost" ]; then
     echo "running"
   else
     echo "healthy"
@@ -147,7 +147,7 @@ EOF
   cat > "$TMPDIR/bin/docker" <<'EOF'
 #!/bin/sh
 if [ "$1" = "inspect" ]; then
-  if [ "$4" = "agent-provost" ]; then
+  if [ "$4" = "llm-provost" ]; then
     echo "running"
   else
     echo "healthy"

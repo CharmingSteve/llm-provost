@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Agent Provost – AWS Marketplace AMI product. Launches a single Graviton EC2
+  LLM Provost – AWS Marketplace AMI product. Launches a single Graviton EC2
   instance with least-privilege IAM, Secrets Manager integration, and an
   audit-grade S3 log bucket.
 
@@ -14,7 +14,7 @@ Parameters:
     Type: AWS::EC2::Image::Id
     Description: >
       AMI ID injected by AWS Marketplace (do not change). The Marketplace
-      substitutes the correct regional Agent Provost golden AMI automatically.
+      substitutes the correct regional LLM Provost golden AMI automatically.
 
   # ── Networking ───────────────────────────────────────────────────────────────
   VpcId:
@@ -59,7 +59,7 @@ Parameters:
     Type: String
     NoEcho: true
     Description: >
-      Bearer token used to authenticate requests to the Agent Provost proxy.
+      Bearer token used to authenticate requests to the LLM Provost proxy.
       Choose a strong random value (e.g. openssl rand -hex 32).
 
   AlpacaPaperTrade:
@@ -308,7 +308,7 @@ Metadata:
           - ForceReplacementToken
     ParameterLabels:
       ImageId:
-        default: "Agent Provost AMI ID"
+        default: "LLM Provost AMI ID"
       VpcId:
         default: "VPC"
       AssignPublicIp:
@@ -366,16 +366,16 @@ Metadata:
 Resources:
 
   # ── 1. Secrets Manager secret ─────────────────────────────────────────────
-  AgentProvostSecret:
+  LLMProvostSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: !Sub "agent-provost-secret-${AWS::StackName}"
-      Description: "Agent Provost runtime secrets (Alpaca keys + Provost token)"
+      Name: !Sub "llm-provost-secret-${AWS::StackName}"
+      Description: "LLM Provost runtime secrets (Alpaca keys + Provost token)"
       SecretString: !Sub |
         {"ALPACA_API_KEY":"${AlpacaApiKey}","ALPACA_SECRET_KEY":"${AlpacaSecretKey}","ALPACA_PAPER_TRADE":"${AlpacaPaperTrade}","PROVOST_TOKEN":"${ProvostToken}","S3_BUCKET":"${LogsBucket}","AWS_REGION":"${AWS::Region}","MaxTradeNotional":${MaxTradeNotional},"MaxSharesPerTrade":${MaxSharesPerTrade},"RateLimitRPM":${RateLimitRPM},"EnableAllowlist":"${EnableAllowlist}","AllowedSymbols":"${AllowedSymbols}","BlockedSymbols":"${BlockedSymbols}","AllowedAssetClasses":"${AllowedAssetClasses}","ForbiddenTools":"${ForbiddenTools}","MaxReplaceNotional":${MaxReplaceNotional},"PreventMarketOrderUpgrade":"${PreventMarketOrderUpgrade}","MaxCloseNotional":${MaxCloseNotional},"AllowedCloseTickers":"${AllowedCloseTickers}","LogDNERequests":"${LogDNERequests}"}
       Tags:
         - Key: Project
-          Value: agent-provost
+          Value: llm-provost
         - Key: ManagedBy
           Value: cloudformation
 
@@ -409,7 +409,7 @@ Resources:
         RestrictPublicBuckets: true
       Tags:
         - Key: Project
-          Value: agent-provost
+          Value: llm-provost
         - Key: ManagedBy
           Value: cloudformation
 
@@ -417,7 +417,7 @@ Resources:
   InstanceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "agent-provost-instance-role-${AWS::StackName}"
+      RoleName: !Sub "llm-provost-instance-role-${AWS::StackName}"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -428,14 +428,14 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Policies:
-        - PolicyName: AgentProvostLeastPrivilege
+        - PolicyName: LLMProvostLeastPrivilege
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Sid: ReadSecret
                 Effect: Allow
                 Action: secretsmanager:GetSecretValue
-                Resource: !Ref AgentProvostSecret
+                Resource: !Ref LLMProvostSecret
               - Sid: WriteLogs
                 Effect: Allow
                 Action: s3:PutObject
@@ -446,14 +446,14 @@ Resources:
                 Resource: "*"
       Tags:
         - Key: Project
-          Value: agent-provost
+          Value: llm-provost
         - Key: ManagedBy
           Value: cloudformation
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      InstanceProfileName: !Sub "agent-provost-instance-profile-${AWS::StackName}"
+      InstanceProfileName: !Sub "llm-provost-instance-profile-${AWS::StackName}"
       Roles:
         - !Ref InstanceRole
 
@@ -462,7 +462,7 @@ Resources:
     Type: AWS::IAM::Policy
     Condition: HasKmsKey
     Properties:
-      PolicyName: !Sub "agent-provost-kms-access-${AWS::StackName}"
+      PolicyName: !Sub "llm-provost-kms-access-${AWS::StackName}"
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -496,7 +496,7 @@ Resources:
   SubnetLookupLambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "agent-provost-subnet-lookup-role-${AWS::StackName}"
+      RoleName: !Sub "llm-provost-subnet-lookup-role-${AWS::StackName}"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -521,7 +521,7 @@ Resources:
                 Resource: "*"
       Tags:
         - Key: Project
-          Value: agent-provost
+          Value: llm-provost
         - Key: ManagedBy
           Value: cloudformation
 
@@ -529,7 +529,7 @@ Resources:
   SubnetLookupLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/lambda/agent-provost-subnet-lookup-${AWS::StackName}"
+      LogGroupName: !Sub "/aws/lambda/llm-provost-subnet-lookup-${AWS::StackName}"
       RetentionInDays: 1
 
   # ── 4b. Lambda Function (subnet lookup) ───────────────────────────────────
@@ -537,7 +537,7 @@ Resources:
     Type: AWS::Lambda::Function
     DependsOn: SubnetLookupLogGroup
     Properties:
-      FunctionName: !Sub "agent-provost-subnet-lookup-${AWS::StackName}"
+      FunctionName: !Sub "llm-provost-subnet-lookup-${AWS::StackName}"
       Handler: index.handler
       Role: !GetAtt SubnetLookupLambdaRole.Arn
       Runtime: python3.12
@@ -590,7 +590,7 @@ Resources:
                   cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
       Tags:
         - Key: Project
-          Value: agent-provost
+          Value: llm-provost
         - Key: ManagedBy
           Value: cloudformation
 
@@ -606,14 +606,14 @@ Resources:
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: "Agent Provost - allow inbound port 8088 only; full outbound"
+      GroupDescription: "LLM Provost - allow inbound port 8088 only; full outbound"
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 8088
           ToPort: 8088
           CidrIp: !Ref MCPAccessLocation
-          Description: "Agent Provost proxy HTTPS port"
+          Description: "LLM Provost proxy HTTPS port"
         - !If
           - EnableSSH
           - IpProtocol: tcp
@@ -628,9 +628,9 @@ Resources:
           Description: "Allow all outbound (internet access for Alpaca + AWS APIs)"
       Tags:
         - Key: Name
-          Value: !Sub "agent-provost-sg-${AWS::StackName}"
+          Value: !Sub "llm-provost-sg-${AWS::StackName}"
         - Key: Project
-          Value: agent-provost
+          Value: llm-provost
         - Key: ManagedBy
           Value: cloudformation
 
@@ -663,9 +663,9 @@ Resources:
           # ForceReplacementToken: ${ForceReplacementToken}
       Tags:
         - Key: Name
-          Value: !Sub "agent-provost-${AWS::StackName}"
+          Value: !Sub "llm-provost-${AWS::StackName}"
         - Key: Project
-          Value: agent-provost
+          Value: llm-provost
         - Key: ManagedBy
           Value: cloudformation
         - Key: ProvostTimezone
@@ -677,22 +677,22 @@ Resources:
 Outputs:
 
   InstanceId:
-    Description: EC2 Instance ID of the Agent Provost node
+    Description: EC2 Instance ID of the LLM Provost node
     Value: !Ref ProvostInstance
 
   InstancePrivateIp:
-    Description: Private IP address of the Agent Provost instance
+    Description: Private IP address of the LLM Provost instance
     Value: !GetAtt ProvostInstance.PrivateIp
 
   ProxyEndpoint:
     Description: >
-      Agent Provost proxy endpoint (accessible from within the VPC or via
+      LLM Provost proxy endpoint (accessible from within the VPC or via
       a load balancer / VPN).
     Value: !Sub "http://${ProvostInstance.PrivateIp}:8088"
 
   SecretArn:
     Description: ARN of the Secrets Manager secret that holds the runtime credentials
-    Value: !Ref AgentProvostSecret
+    Value: !Ref LLMProvostSecret
 
   LogsBucketName:
     Description: Name of the S3 bucket receiving Fluent Bit audit logs

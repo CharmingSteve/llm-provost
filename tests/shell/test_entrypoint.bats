@@ -63,7 +63,7 @@
 }
 
 @test "verify_proxy_routing.sh: supports S3 audit evidence check" {
-    run grep -c "check_s3_for_probe\|VERIFY_S3_BUCKET\|agent-provost/logs" verify_proxy_routing.sh
+    run grep -c "check_s3_for_probe\|VERIFY_S3_BUCKET\|llm-provost/logs" verify_proxy_routing.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }

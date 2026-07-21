@@ -1,6 +1,6 @@
 # Third-Party Software Notices
 
-Agent Provost utilizes the following open-source software components. We are grateful to the open-source community for their contributions.
+LLM Provost utilizes the following open-source software components. We are grateful to the open-source community for their contributions.
 
 ---
 

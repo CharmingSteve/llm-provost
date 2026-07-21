@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mxfile host="app.diagrams.net">
-  <diagram name="agent-provost" id="agent-provost-arch-2026">
+  <diagram name="llm-provost" id="llm-provost-arch-2026">
     <mxGraphModel dx="1736" dy="1601" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1560" pageHeight="878" background="#ffffff" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
 
         <!-- ===================== TITLE ===================== -->
-        <mxCell id="title" parent="1" vertex="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#232F3E;" value="Agent Provost &#8212; AWS Marketplace AMI Deployment (CloudFormation)">
+        <mxCell id="title" parent="1" vertex="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#232F3E;" value="LLM Provost &#8212; AWS Marketplace AMI Deployment (CloudFormation)">
           <mxGeometry x="430" y="18" width="700" height="24" as="geometry" />
         </mxCell>
 
@@ -37,7 +37,7 @@
         </mxCell>
 
         <!-- ===================== EC2 + INTERNALS ===================== -->
-        <mxCell id="ec2" parent="1" vertex="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientDirection=north;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#D05C17;gradientColor=#F78E04;" value="Agent Provost EC2&#10;SubnetId from SubnetLookup&#10;AssociatePublicIpAddress per AssignPublicIp">
+        <mxCell id="ec2" parent="1" vertex="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientDirection=north;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;fillColor=#D05C17;gradientColor=#F78E04;" value="LLM Provost EC2&#10;SubnetId from SubnetLookup&#10;AssociatePublicIpAddress per AssignPublicIp">
           <mxGeometry x="460" y="405" width="78" height="78" as="geometry" />
         </mxCell>
 

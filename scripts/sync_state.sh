@@ -33,7 +33,7 @@ if [[ -n "${TZ}" && "${TZ}" != "None" ]]; then
   fi
 fi
 
-SECRET_NAME="agent-provost-secret-${STACK_NAME}"
+SECRET_NAME="llm-provost-secret-${STACK_NAME}"
 SECRET_STRING="$(aws secretsmanager get-secret-value \
   --region "${REGION}" \
   --secret-id "${SECRET_NAME}" \
@@ -125,14 +125,14 @@ printf '%s\n' "${SECRET_STRING}" | jq '
       params: { enabled: (.LogDNERequests | to_bool) }
     }
   }
-' >/opt/agent-provost/rules.json
+' >/opt/llm-provost/rules.json
 
-chown provost:provost /opt/agent-provost/rules.json
-chmod 0644 /opt/agent-provost/rules.json
+chown provost:provost /opt/llm-provost/rules.json
+chmod 0644 /opt/llm-provost/rules.json
 
 running_services="$(docker ps --format '{{.Names}}' 2>/dev/null || true)"
 should_launch=0
-if [[ "${running_services}" != *"agent-provost"* || "${running_services}" != *"alpaca-mcp"* || "${running_services}" != *"fluent-bit"* ]]; then
+if [[ "${running_services}" != *"llm-provost"* || "${running_services}" != *"alpaca-mcp"* || "${running_services}" != *"fluent-bit"* ]]; then
   should_launch=1
 fi
 if pgrep -f cloud-init >/dev/null 2>&1; then
@@ -140,12 +140,12 @@ if pgrep -f cloud-init >/dev/null 2>&1; then
 fi
 
 if [[ "${should_launch}" == "1" ]]; then
-  cd /opt/agent-provost
+  cd /opt/llm-provost
   export PROVOST_SECRET_NAME="${SECRET_NAME}"
   export AWS_REGION="${REGION}"
   export S3_BUCKET="${S3_BUCKET}"
   export ALLOW_EC2_LOCAL_FALLBACK_SECRETS="false"
-  eval "$(sh /opt/agent-provost/bootstrap.sh ec2)"
+  eval "$(sh /opt/llm-provost/bootstrap.sh ec2)"
 
   cp /run/provost-secrets/alpaca_api_key /run/secrets/alpaca_api_key
   cp /run/provost-secrets/alpaca_secret_key /run/secrets/alpaca_secret_key
@@ -154,9 +154,9 @@ if [[ "${should_launch}" == "1" ]]; then
   chmod 444 /run/secrets/alpaca_api_key /run/secrets/alpaca_secret_key /run/secrets/alpaca_paper_trade /run/secrets/provost_token
   chown root:root /run/secrets/alpaca_api_key /run/secrets/alpaca_secret_key /run/secrets/alpaca_paper_trade /run/secrets/provost_token
 
-  rm -rf /opt/agent-provost/.secrets
-  mkdir -p /opt/agent-provost/logs/fluent-bit-storage
-  chown -R 65532:65532 /opt/agent-provost/logs/fluent-bit-storage
+  rm -rf /opt/llm-provost/.secrets
+  mkdir -p /opt/llm-provost/logs/fluent-bit-storage
+  chown -R 65532:65532 /opt/llm-provost/logs/fluent-bit-storage
 
   export PROVOST_SECRETS_DIR="/run/secrets"
   ALPACA_API_KEY="$(cat /run/secrets/alpaca_api_key)"

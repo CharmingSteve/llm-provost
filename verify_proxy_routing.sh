@@ -82,14 +82,14 @@ wait_for_fluentbit_health() {
 wait_for_agent_running() {
     i=0
     while [ "$i" -lt 30 ]; do
-        status=$($DOCKER_BIN inspect -f '{{.State.Status}}' agent-provost 2>/dev/null || true)
+        status=$($DOCKER_BIN inspect -f '{{.State.Status}}' llm-provost 2>/dev/null || true)
         if [ "$status" = "running" ]; then
             return 0
         fi
         i=$((i + 1))
         sleep 2
     done
-    echo "[verify] FAIL: agent-provost did not reach running state"
+    echo "[verify] FAIL: llm-provost did not reach running state"
     return 1
 }
 
@@ -140,7 +140,7 @@ check_s3_for_probe() {
 
     now_utc_date="$(date -u +%Y/%m/%d)"
     now_local_date="$(date +%Y/%m/%d)"
-    s3_access_base="${VERIFY_S3_PREFIX}agent-provost/logs/access/"
+    s3_access_base="${VERIFY_S3_PREFIX}llm-provost/logs/access/"
     prefixes="${s3_access_base}$now_utc_date/ ${s3_access_base}$now_local_date/"
     deadline=$(( $(date +%s) + VERIFY_S3_POLL_SECONDS ))
     saw_access_denied=0
@@ -193,7 +193,7 @@ check_s3_for_probe() {
             probe_in_buffer=1
         fi
 
-        if "$DOCKER_BIN" logs --since "$PROBE_START_RFC3339" fluent-bit 2>&1 | grep -qE "Successfully uploaded object /.*/agent-provost/logs/access/|Successfully uploaded object /agent-provost/logs/access/"; then
+        if "$DOCKER_BIN" logs --since "$PROBE_START_RFC3339" fluent-bit 2>&1 | grep -qE "Successfully uploaded object /.*/llm-provost/logs/access/|Successfully uploaded object /llm-provost/logs/access/"; then
             uploaded_since_probe=1
         fi
 
@@ -249,7 +249,7 @@ $COMPOSE_CMD up -d --force-recreate >/dev/null
 wait_for_fluentbit_health
 wait_for_agent_running
 
-if ! "$DOCKER_BIN" exec agent-provost sh -lc "test -S '$SOCKET_PATH'" >/dev/null 2>&1; then
+if ! "$DOCKER_BIN" exec llm-provost sh -lc "test -S '$SOCKET_PATH'" >/dev/null 2>&1; then
     echo "[verify] FAIL: fluent-bit socket missing at $SOCKET_PATH"
     exit 1
 fi
