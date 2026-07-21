@@ -7,3 +7,5 @@ services:
 
   llm-provost:
     image: llm-provost:local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

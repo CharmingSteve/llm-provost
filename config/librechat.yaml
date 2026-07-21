@@ -12,7 +12,7 @@ endpoints:
   custom:
     - name: "OpenWire"
       apiKey: "n/a" # OpenWire doesn't require an API key by default
-      baseURL: "http://host.docker.internal:3030/v1"
+      baseURL: "http://llm-provost:8000/v1"
       models:
         default:
           - "gpt-5-mini" # You can set a default, but fetch: true will grab the rest
