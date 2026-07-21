@@ -1,0 +1,17 @@
+version: 1.2.3
+cache: true
+
+interface:
+  mcpServers:
+    use: true
+    create: false
+    share: false
+    public: false
+
+mcpServers:
+  dummy:
+    type: streamable-http
+    url: http://llm-provost:8000/mcp/dummy
+    headers:
+      X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
+      X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"

@@ -6,14 +6,13 @@ ARG BASE_PYTHON_IMAGE=python:3.11-alpine@sha256:5f2c7aad5aa1aa37c8e023c8bdd40aab
 FROM ${BASE_PYTHON_IMAGE}
 
 COPY hash-pip/requirements-runtime.txt /tmp/requirements-runtime.txt
-# The upstream MCP server package is installed with pip.
 RUN apk upgrade --no-cache \
 	&& pip install --no-cache-dir --require-hashes --no-deps -r /tmp/requirements-runtime.txt \
-	&& upstream_pkg="$(printf '%s' 'alpa''ca-mcp-server==2.1.0')" \
-	&& pip install --no-cache-dir "$upstream_pkg" \
 	&& rm -f /tmp/requirements-runtime.txt \
 	&& adduser -D -u 10001 -s /bin/sh appuser \
 	&& chown -R appuser:appuser /usr/local/lib/python3.11/site-packages
+
+COPY mcp_server/ /app/mcp_server/
 
 USER appuser
 

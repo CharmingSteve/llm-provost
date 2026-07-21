@@ -105,10 +105,59 @@ services:
     pids_limit: 256
     restart: unless-stopped
 
+  mongodb:
+    image: mongo:8.0.20
+    container_name: provost-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - app_net
+    security_opt:
+      - no-new-privileges:true
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.35.1
+    container_name: provost-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_HOST: http://0.0.0.0:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-provost-dev-meili-key}
+    volumes:
+      - meili_data:/meili_data
+    networks:
+      - app_net
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    image: ghcr.io/danny-avila/librechat-dev:latest
+    container_name: provost-librechat
+    restart: unless-stopped
+    ports:
+      - "3080:3080"
+    depends_on:
+      - mongodb
+      - meilisearch
+    env_file:
+      - config/.env.template
+    volumes:
+      - ./config/librechat.yaml:/app/librechat.yaml:ro
+      - ./config/.env.template:/app/.env:ro
+      - librechat_images:/app/client/public/images
+      - librechat_uploads:/app/uploads
+    networks:
+      - app_net
+      - proxy_egress
+    security_opt:
+      - no-new-privileges:true
+
 networks:
   mcp_internal:
     internal: true
   proxy_egress:
+  app_net:
+    driver: bridge
 
 volumes:
   provost_run:
@@ -117,3 +166,7 @@ volumes:
       type: tmpfs
       device: tmpfs
       o: uid=0,gid=0,mode=0777
+  mongodb_data:
+  meili_data:
+  librechat_images:
+  librechat_uploads:
