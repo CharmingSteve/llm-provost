@@ -10,9 +10,10 @@
     "body_bytes_sent",
     "request_time",
     "upstream_response_time",
-    "provost_request_id",
-    "provost_user",
-    "provost_machine",
+    "request_id",
+    "user_id",
+    "customer_id",
+    "conversation_id",
     "request_body",
     "resp_body",
     "pri",
@@ -46,13 +47,16 @@
     "upstream_response_time": {
       "type": "string"
     },
-    "provost_request_id": {
+    "request_id": {
       "type": "string"
     },
-    "provost_user": {
+    "user_id": {
       "type": "string"
     },
-    "provost_machine": {
+    "customer_id": {
+      "type": "string"
+    },
+    "conversation_id": {
       "type": "string"
     },
     "request_body": {

@@ -1,30 +1,6 @@
 local cjson = require("cjson.safe")
 local http = require("resty.http")
-
-local function get_mcp_url(server_name)
-    local path = os.getenv("MCP_ROUTING_TABLE_PATH") or "/etc/nginx/mcp_routes.json"
-    local file, open_error = io.open(path, "r")
-    if not file then
-        return nil, "routing table not found at " .. path .. ": " .. (open_error or "unknown")
-    end
-
-    local content = file:read("*a")
-    file:close()
-    local routes = cjson.decode(content)
-    if type(routes) ~= "table" then
-        return nil, "invalid routing table JSON"
-    end
-
-    local destination = routes[server_name]
-    if type(destination) ~= "string" or destination == "" then
-        return nil, "server '" .. server_name .. "' not found in routing table"
-    end
-    if not destination:match("^https?://") then
-        return nil, "server destination must use HTTP or HTTPS"
-    end
-
-    return destination:gsub("/$", "")
-end
+local routes = require("routes")
 
 local function respond(status, payload)
     ngx.status = status
@@ -39,7 +15,7 @@ if not server_name then
     return respond(ngx.HTTP_BAD_REQUEST, { error = "Invalid MCP path" })
 end
 
-local destination, route_error = get_mcp_url(server_name)
+local destination, route_error = routes.get(server_name)
 if not destination then
     return respond(ngx.HTTP_BAD_GATEWAY, {
         error = "MCP server not found",
@@ -61,7 +37,13 @@ if ngx.var.is_args == "?" and ngx.var.args then
     target_url = target_url .. "?" .. ngx.var.args
 end
 
-ngx.req.read_body()
+local request_body = ngx.ctx.request_body
+if type(request_body) ~= "string" then
+    return respond(ngx.HTTP_INTERNAL_SERVER_ERROR, {
+        error = "Request body unavailable",
+    })
+end
+ngx.var.req_body = request_body
 local headers = ngx.req.get_headers()
 headers.host = nil
 headers.Host = nil
@@ -72,7 +54,7 @@ local client = http.new()
 client:set_timeout(30000)
 local response, request_error = client:request_uri(target_url, {
     method = ngx.req.get_method(),
-    body = ngx.req.get_body_data(),
+    body = request_body,
     headers = headers,
     ssl_verify = true,
 })
@@ -94,5 +76,7 @@ for name, value in pairs(response.headers) do
     end
 end
 ngx.print(response.body or "")
+ngx.ctx.response_body = response.body or ""
+ngx.var.resp_body = response.body or ""
 
 return nil

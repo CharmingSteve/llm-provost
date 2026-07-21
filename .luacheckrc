@@ -11,4 +11,4 @@ globals = {
 -- Relax unused-variable warnings that are common in busted describe/it blocks.
 ignore = { "211", "212", "311" }
 
-std = "min"
+std = "lua51+busted"

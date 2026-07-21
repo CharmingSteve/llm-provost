@@ -7,9 +7,10 @@
     "remote_addr",
     "request",
     "status",
-    "provost_request_id",
-    "provost_user",
-    "provost_machine",
+    "request_id",
+    "user_id",
+    "customer_id",
+    "conversation_id",
     "request_body",
     "resp_body",
     "error_code",
@@ -36,13 +37,22 @@
     "status": {
       "type": "string"
     },
-    "provost_request_id": {
+    "request_id": {
       "type": "string"
     },
-    "provost_user": {
+    "user_id": {
       "type": "string"
     },
-    "provost_machine": {
+    "customer_id": {
+      "type": "string"
+    },
+    "conversation_id": {
+      "type": "string"
+    },
+    "tool_name": {
+      "type": "string"
+    },
+    "destination": {
       "type": "string"
     },
     "request_body": {

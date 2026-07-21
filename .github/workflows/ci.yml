@@ -65,7 +65,9 @@ jobs:
           sudo apt-get install -y lua5.1 luarocks
           sudo luarocks install luacheck
       - name: Lint Lua test files
-        run: luacheck tests/lua/
+        run: |
+          set -euo pipefail
+          luacheck tests/lua/ tests/test_audit_contract.lua tests/test_identity_extraction.lua
 
   # ── Lua unit tests ─────────────────────────────────────────────────────────
   test-lua:
@@ -83,6 +85,22 @@ jobs:
       - name: Run Lua unit tests
         run: busted tests/lua/
 
+  # ── Python unit tests ────────────────────────────────────────────────────
+  test-python:
+    name: pytest (audit contract)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pytest
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y python3-pytest
+      - name: Run Python audit contract
+        run: |
+          set -euo pipefail
+          python3 -m pytest tests/test_audit_logs.py
+
   # ── Shell unit tests ───────────────────────────────────────────────────────
   test-shell:
     name: bats (shell unit tests)
@@ -99,6 +117,11 @@ jobs:
           echo "/tmp/check-jsonschema-venv/bin" >> "$GITHUB_PATH"
       - name: Run bats tests
         run: bats tests/shell/
+      - name: Validate audit JSON schemas
+        run: |
+          set -euo pipefail
+          check-jsonschema --check-metaschema schemas/access_log_schema.json
+          check-jsonschema --check-metaschema schemas/error_log_schema.json
 
   # ── GitHub Actions workflow linting ──────────────────────────────────────
   lint-github-actions:

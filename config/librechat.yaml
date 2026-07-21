@@ -16,7 +16,7 @@ endpoints:
       models:
         default:
           - "gpt-5-mini" # You can set a default, but fetch: true will grab the rest
-        #fetch: true
+        fetch: true
 
 interface:
   mcpServers:

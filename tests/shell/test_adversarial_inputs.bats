@@ -6,6 +6,7 @@ setup() {
   POLICY_FILE="$ROOT_DIR/lua/http_policy.lua"
   ENGINE_FILE="$ROOT_DIR/lua/rules_engine.lua"
   PROXY_FILE="$ROOT_DIR/lua/mcp_proxy.lua"
+  ROUTES_FILE="$ROOT_DIR/lua/routes.lua"
 }
 
 @test "adversarial auth: JWT parsing requires exactly three segments" {
@@ -24,7 +25,7 @@ setup() {
 }
 
 @test "adversarial routing: destinations require HTTP or HTTPS and verify TLS" {
-  run grep -F 'destination:match("^https?://")' "$PROXY_FILE"
+  run grep -F 'destination:match("^https?://")' "$ROUTES_FILE"
   [ "$status" -eq 0 ]
   run grep -F 'ssl_verify = true' "$PROXY_FILE"
   [ "$status" -eq 0 ]
