@@ -1,6 +1,23 @@
 version: 1.2.3
 cache: true
 
+endpoints:
+  anthropic:
+    apiKey: "${ANTHROPIC_API_KEY}"
+    promptCache: true
+    models:
+      - "claude-3-5-sonnet-20241022"
+    fetch: true
+
+  custom:
+    - name: "OpenWire"
+      apiKey: "n/a" # OpenWire doesn't require an API key by default
+      baseURL: "http://host.docker.internal:3030/v1"
+      models:
+        default:
+          - "gpt-5-mini" # You can set a default, but fetch: true will grab the rest
+        fetch: true
+
 interface:
   mcpServers:
     use: true

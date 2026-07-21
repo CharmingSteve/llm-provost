@@ -23,9 +23,9 @@ setup() {
   [ "$status" -eq 1 ]
 }
 
-@test "dual auth: compatibility token remains available to compose" {
+@test "dual auth: compatibility token is removed from compose" {
   run grep -q 'PROVOST_TOKEN:' "$COMPOSE_FILE"
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "dual auth: user and conversation defaults are present" {

@@ -18,19 +18,19 @@
 }
 
 @test "entrypoint.sh: starts MCP server on port 8088" {
-    run grep -c "\-\-port 8088" entrypoint.sh
+    run grep -c '^PORT = 8088$' mcp_server/server.py
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
-@test "entrypoint.sh: uses streamable-http transport" {
-    run grep -c "streamable-http" entrypoint.sh
+@test "entrypoint.sh: starts the JSON-RPC HTTP server" {
+    run grep -c 'ThreadingHTTPServer' mcp_server/server.py
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
 @test "entrypoint.sh: binds server to 0.0.0.0 (all interfaces)" {
-    run grep -c "\-\-host 0.0.0.0" entrypoint.sh
+    run grep -c '^HOST = "0.0.0.0"$' mcp_server/server.py
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
@@ -49,50 +49,50 @@
     [ "$output" -ge 1 ]
 }
 
-@test "verify_proxy_routing.sh: validates fluent-bit health before probe" {
-    run grep -c "wait_for_fluentbit_health\|fluent-bit health" verify_proxy_routing.sh
+@test "verify_proxy_routing.sh: probes Path A chat completions" {
+    run grep -c 'v1/chat/completions' verify_proxy_routing.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
-@test "verify_proxy_routing.sh: validates socket path in shared runtime dir" {
-    run grep -c "fluent-bit.sock\|socket present" verify_proxy_routing.sh
+@test "verify_proxy_routing.sh: probes Path B dummy MCP" {
+    run grep -c 'mcp/dummy' verify_proxy_routing.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
-@test "verify_proxy_routing.sh: supports S3 audit evidence check" {
-    run grep -c "check_s3_for_probe\|VERIFY_S3_BUCKET\|llm-provost/logs" verify_proxy_routing.sh
+@test "verify_proxy_routing.sh: sends JSON-RPC initialize" {
+    run grep -c '"method":"initialize"' verify_proxy_routing.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
-@test "verify_proxy_routing.sh: supports buffer fallback evidence check" {
-    run grep -c "check_buffer_evidence\|fluent-bit buffer" verify_proxy_routing.sh
+@test "verify_proxy_routing.sh: checks all four IDs" {
+    run grep -c 'request_id.*user_id.*customer_id.*conversation_id\|user_id.*customer_id.*conversation_id.*request_id' verify_proxy_routing.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
-@test "verify_proxy_routing.sh: embeds unique probe request id marker" {
-    run grep -c "PROBE_ID\|X-Provost-Request-Id\|PROVOST_VERIFY_REQUEST_ID" verify_proxy_routing.sh
+@test "verify_proxy_routing.sh: uses curl for requests" {
+    run grep -c 'curl --silent' verify_proxy_routing.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
-@test "verify_proxy_routing.sh: can force S3-only or buffer-only mode" {
-    run grep -c "VERIFY_REQUIRE_S3\|true)\|false)\|auto)" verify_proxy_routing.sh
+@test "verify_proxy_routing.sh: checks Authorization log privacy" {
+    run grep -c 'Authorization header value' verify_proxy_routing.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
-@test "verify_proxy_routing.sh: reports PASS for fluent-bit audit path" {
-    run grep -c "PASS: fluent-bit socket/audit path validated" verify_proxy_routing.sh
+@test "verify_proxy_routing.sh: reports PASS for dual routing" {
+    run grep -c 'PASS: dual-path proxy routing verified' verify_proxy_routing.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
-@test "verify_proxy_routing.sh: probes the MCP endpoint on port 8088" {
-    run grep -c "localhost:8088" verify_proxy_routing.sh
+@test "verify_proxy_routing.sh: defaults to proxy port 8000" {
+    run grep -c 'localhost:8000' verify_proxy_routing.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
@@ -105,16 +105,22 @@
     [ "$output" -ge 1 ]
 }
 
-@test "bootstrap.sh: ec2 fallback copy requires explicit ALLOW_EC2_LOCAL_FALLBACK_SECRETS" {
-    run grep -c 'ALLOW_EC2_LOCAL_FALLBACK_SECRETS' bootstrap.sh
+@test "bootstrap.sh: loads production secrets from Secrets Manager" {
+    run grep -c 'aws secretsmanager get-secret-value' bootstrap.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
 
-@test "bootstrap.sh: stages the LLM API key without legacy MCP credentials" {
-    run grep -c 'LLM_API_KEY' bootstrap.sh
+@test "bootstrap.sh: handles LLM and Cognito secrets without legacy MCP credentials" {
+    run grep -c 'LLM_API_KEY OPENID_CLIENT_ID OPENID_CLIENT_SECRET OPENID_SESSION_SECRET MEILI_MASTER_KEY' bootstrap.sh
     [ "$status" -eq 0 ]
-    [ "$output" -ge 3 ]
+    [ "$output" -ge 1 ]
     run grep -E 'MCP_API_KEY|MCP_SECRET_KEY|MCP_PAPER_TRADE' bootstrap.sh
     [ "$status" -eq 1 ]
+}
+
+@test "bootstrap.sh: starts OpenResty in container mode" {
+    run grep -c "exec openresty -g 'daemon off;'" bootstrap.sh
+    [ "$status" -eq 0 ]
+    [ "$output" -ge 1 ]
 }

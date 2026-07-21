@@ -65,6 +65,7 @@ services:
     restart: unless-stopped
   llm-provost:
     # LLM Provost image is the public OpenResty image with a custom entrypoint script that runs the rules. Digest is sourced from .env.versions via: docker compose --env-file .env.versions.
+    build: .
     image: ${OPENRESTY_IMAGE}
     pull_policy: if_not_present
     container_name: llm-provost
@@ -74,22 +75,21 @@ services:
       fluent-bit:
         condition: service_healthy
     ports:
-      - "8088:8000"
+      - "8000:8000"
     expose:
       - "8081"
     volumes:
       - ./default.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./lua:/etc/nginx/lua:ro
-      - ./rules.json:/etc/rules.json:ro
-      - ./mcp_routes.json:/etc/nginx/mcp_routes.json:ro
+      - ./rules.json:/etc/nginx/rules.json:ro
+      - ./mcp_routes.json:/etc/nginx/mcp_routes/mcp_routes.json:ro
       - ${PROVOST_SECRETS_DIR:-./.secrets}:/run/secrets:ro
       - provost_run:/var/run/provost
       - /etc/localtime:/etc/localtime:ro
     environment:
       LLM_API_URL: ${LLM_API_URL:-https://api.openai.com}
       LLM_API_KEY: ${LLM_API_KEY:-}
-      MCP_ROUTING_TABLE_PATH: /etc/nginx/mcp_routes.json
-      PROVOST_TOKEN: ${PROVOST_TOKEN:-}
+      MCP_ROUTING_TABLE_PATH: /etc/nginx/mcp_routes/mcp_routes.json
       TZ: ${TZ:-Asia/Jerusalem}
     networks:
       - mcp_internal
@@ -139,11 +139,27 @@ services:
     depends_on:
       - mongodb
       - meilisearch
-    env_file:
-      - config/.env.template
+    environment:
+      # Static config (never changes)
+      PORT: "3080"
+      HOST: "0.0.0.0"
+      PROXY: "http://llm-provost:8000"
+      MONGO_URI: "mongodb://mongodb:27017/LibreChat"
+      SEARCH: "true"
+      MEILI_HOST: "http://meilisearch:7700"
+      MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-provost-dev-meili-key}"
+      ENDPOINTS: "openAI"
+      # Secrets (from .env file)
+      OPENID_CLIENT_ID: "${OPENID_CLIENT_ID:-}"
+      OPENID_CLIENT_SECRET: "${OPENID_CLIENT_SECRET:-}"
+      OPENID_ISSUER: "${OPENID_ISSUER:-}"
+      OPENID_CALLBACK_URL: "${OPENID_CALLBACK_URL:-/oauth/openid/callback}"
+      OPENID_SESSION_SECRET: "${OPENID_SESSION_SECRET:-change-this-to-a-random-string}"
+      OPENID_SCOPE: "openid profile email"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_REVERSE_PROXY: "${OPENAI_REVERSE_PROXY:-}"
     volumes:
       - ./config/librechat.yaml:/app/librechat.yaml:ro
-      - ./config/.env.template:/app/.env:ro
       - librechat_images:/app/client/public/images
       - librechat_uploads:/app/uploads
     networks:

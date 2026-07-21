@@ -2,180 +2,78 @@
 
 setup() {
   export TEST_REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
+  export TEST_DIR="$(mktemp -d)"
+  export PATH="$TEST_DIR/bin:$PATH"
+  export PROVOST_LOG_FILE="$TEST_DIR/access.log"
+  mkdir -p "$TEST_DIR/bin"
+
+  cat > "$TEST_DIR/bin/curl" <<'EOF'
+#!/bin/sh
+headers_file=""
+body_file=""
+url=""
+authorization=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dump-header) headers_file="$2"; shift 2 ;;
+    --output) body_file="$2"; shift 2 ;;
+    --header)
+      case "$2" in
+        Authorization:*) authorization="$2" ;;
+      esac
+      shift 2
+      ;;
+    --write-out|--request|--data|--connect-timeout|--max-time) shift 2 ;;
+    --silent|--show-error) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+printf 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n' > "$headers_file"
+case "$url" in
+  */mcp/dummy)
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"dummy"}}}' > "$body_file"
+    printf '%s' "${MCP_STATUS:-200}"
+    ;;
+  *)
+    printf '%s\n' '{"error":{"message":"mock backend unavailable"}}' > "$body_file"
+    printf '%s' '502'
+    ;;
+esac
+if [ "${LEAK_AUTH:-false}" = true ]; then
+  printf '%s\n' "$authorization" >> "$PROVOST_LOG_FILE"
+fi
+EOF
+  chmod +x "$TEST_DIR/bin/curl"
+  printf '%s\n' '{"request_id":"r-1","user_id":"u-1","customer_id":"c-1","conversation_id":"chat-1"}' > "$PROVOST_LOG_FILE"
 }
 
-@test "verify_proxy_routing.sh passes with healthy fluent-bit and buffer evidence" {
-  TMPDIR="$(mktemp -d)"
-  cp "$TEST_REPO_ROOT/verify_proxy_routing.sh" "$TMPDIR/verify_proxy_routing.sh"
-  mkdir -p "$TMPDIR/.provost-run" "$TMPDIR/logs/fluent-bit-storage/s3"
-  touch "$TMPDIR/logs/fluent-bit-storage/s3/chunk.db"
+teardown() {
+  rm -rf "$TEST_DIR"
+}
 
-  mkdir -p "$TMPDIR/bin" "$TMPDIR/.venv/bin"
-  cat > "$TMPDIR/bin/docker" <<'EOF'
-#!/bin/sh
-if [ "$1" = "inspect" ]; then
-  if [ "$4" = "llm-provost" ]; then
-    echo "running"
-  else
-    echo "healthy"
-  fi
-  exit 0
-fi
-if [ "$1" = "compose" ]; then
-  exit 0
-fi
-if [ "$1" = "exec" ]; then
-  exit 0
-fi
-exit 0
-EOF
-  chmod +x "$TMPDIR/bin/docker"
-
-  cat > "$TMPDIR/bin/sleep" <<'EOF'
-#!/bin/sh
-exit 0
-EOF
-  chmod +x "$TMPDIR/bin/sleep"
-
-  cat > "$TMPDIR/.venv/bin/python" <<'EOF'
-#!/bin/sh
-echo "initialize_status=200"
-echo "tools_call_status=200"
-echo "tool_is_error=False"
-exit 0
-EOF
-  chmod +x "$TMPDIR/.venv/bin/python"
-
-  python3 - <<EOF
-import socket
-sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-sock.bind("$TMPDIR/.provost-run/fluent-bit.sock")
-sock.close()
-EOF
-
-  run env PATH="$TMPDIR/bin:$PATH" ROOT_DIR="$TMPDIR" PROJECT_DIR="$TMPDIR" PYTHON_BIN="$TMPDIR/.venv/bin/python" PROVOST_RUN_DIR="$TMPDIR/.provost-run" VERIFY_REQUIRE_S3=false sh "$TMPDIR/verify_proxy_routing.sh"
+@test "verify_proxy_routing.sh passes both paths with IDs and private logs" {
+  run env PROVOST_URL=http://proxy.test sh "$TEST_REPO_ROOT/verify_proxy_routing.sh"
   [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS: Path A"* ]]
+  [[ "$output" == *"PASS: Path B"* ]]
+  [[ "$output" == *"PASS: dual-path proxy routing verified"* ]]
 }
 
-@test "verify_proxy_routing.sh fails when probe returns a non-zero exit code" {
-  TMPDIR="$(mktemp -d)"
-  cp "$TEST_REPO_ROOT/verify_proxy_routing.sh" "$TMPDIR/verify_proxy_routing.sh"
-  mkdir -p "$TMPDIR/.provost-run" "$TMPDIR/logs/fluent-bit-storage" "$TMPDIR/bin" "$TMPDIR/.venv/bin"
-
-  cat > "$TMPDIR/bin/docker" <<'EOF'
-#!/bin/sh
-if [ "$1" = "inspect" ]; then
-  if [ "$4" = "llm-provost" ]; then
-    echo "running"
-  else
-    echo "healthy"
-  fi
-  exit 0
-fi
-if [ "$1" = "compose" ]; then
-  exit 0
-fi
-if [ "$1" = "exec" ]; then
-  exit 0
-fi
-exit 0
-EOF
-  chmod +x "$TMPDIR/bin/docker"
-
-  cat > "$TMPDIR/bin/sleep" <<'EOF'
-#!/bin/sh
-exit 0
-EOF
-  chmod +x "$TMPDIR/bin/sleep"
-
-  cat > "$TMPDIR/.venv/bin/python" <<'EOF'
-#!/bin/sh
-exit 1
-EOF
-  chmod +x "$TMPDIR/.venv/bin/python"
-
-  python3 - <<EOF
-import socket
-sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-sock.bind("$TMPDIR/.provost-run/fluent-bit.sock")
-sock.close()
-EOF
-
-  run env PATH="$TMPDIR/bin:$PATH" ROOT_DIR="$TMPDIR" PROJECT_DIR="$TMPDIR" PYTHON_BIN="$TMPDIR/.venv/bin/python" PROVOST_RUN_DIR="$TMPDIR/.provost-run" VERIFY_REQUIRE_S3=false sh "$TMPDIR/verify_proxy_routing.sh"
+@test "verify_proxy_routing.sh fails when MCP forwarding fails" {
+  run env MCP_STATUS=502 PROVOST_URL=http://proxy.test sh "$TEST_REPO_ROOT/verify_proxy_routing.sh"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL: Path B"* ]]
 }
 
-@test "verify_proxy_routing.sh fails when fluent-bit is unhealthy" {
-  TMPDIR="$(mktemp -d)"
-  cp "$TEST_REPO_ROOT/verify_proxy_routing.sh" "$TMPDIR/verify_proxy_routing.sh"
-  mkdir -p "$TMPDIR/bin" "$TMPDIR/.venv/bin"
-
-  cat > "$TMPDIR/bin/docker" <<'EOF'
-#!/bin/sh
-if [ "$1" = "inspect" ]; then
-  echo "starting"
-  exit 0
-fi
-if [ "$1" = "compose" ]; then
-  exit 0
-fi
-exit 0
-EOF
-  chmod +x "$TMPDIR/bin/docker"
-
-  cat > "$TMPDIR/bin/sleep" <<'EOF'
-#!/bin/sh
-exit 0
-EOF
-  chmod +x "$TMPDIR/bin/sleep"
-
-  cat > "$TMPDIR/.venv/bin/python" <<'EOF'
-#!/bin/sh
-exit 0
-EOF
-  chmod +x "$TMPDIR/.venv/bin/python"
-
-  run env PATH="$TMPDIR/bin:$PATH" ROOT_DIR="$TMPDIR" PROJECT_DIR="$TMPDIR" PYTHON_BIN="$TMPDIR/.venv/bin/python" VERIFY_REQUIRE_S3=false sh "$TMPDIR/verify_proxy_routing.sh"
+@test "verify_proxy_routing.sh fails when four-layer IDs are absent" {
+  : > "$PROVOST_LOG_FILE"
+  run env PROVOST_URL=http://proxy.test sh "$TEST_REPO_ROOT/verify_proxy_routing.sh"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL: 4-layer IDs"* ]]
 }
 
-@test "verify_proxy_routing.sh fails when socket is missing" {
-  TMPDIR="$(mktemp -d)"
-  cp "$TEST_REPO_ROOT/verify_proxy_routing.sh" "$TMPDIR/verify_proxy_routing.sh"
-  mkdir -p "$TMPDIR/.provost-run" "$TMPDIR/logs/fluent-bit-storage" "$TMPDIR/bin" "$TMPDIR/.venv/bin"
-
-  cat > "$TMPDIR/bin/docker" <<'EOF'
-#!/bin/sh
-if [ "$1" = "inspect" ]; then
-  if [ "$4" = "llm-provost" ]; then
-    echo "running"
-  else
-    echo "healthy"
-  fi
-  exit 0
-fi
-if [ "$1" = "compose" ]; then
-  exit 0
-fi
-if [ "$1" = "exec" ]; then
-  exit 1
-fi
-exit 0
-EOF
-  chmod +x "$TMPDIR/bin/docker"
-
-  cat > "$TMPDIR/bin/sleep" <<'EOF'
-#!/bin/sh
-exit 0
-EOF
-  chmod +x "$TMPDIR/bin/sleep"
-
-  cat > "$TMPDIR/.venv/bin/python" <<'EOF'
-#!/bin/sh
-exit 0
-EOF
-  chmod +x "$TMPDIR/.venv/bin/python"
-
-  run env PATH="$TMPDIR/bin:$PATH" ROOT_DIR="$TMPDIR" PROJECT_DIR="$TMPDIR" PYTHON_BIN="$TMPDIR/.venv/bin/python" PROVOST_RUN_DIR="$TMPDIR/.provost-run" VERIFY_REQUIRE_S3=false sh "$TMPDIR/verify_proxy_routing.sh"
+@test "verify_proxy_routing.sh fails when authorization value reaches logs" {
+  run env LEAK_AUTH=true PROVOST_URL=http://proxy.test sh "$TEST_REPO_ROOT/verify_proxy_routing.sh"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL: Authorization header value"* ]]
 }

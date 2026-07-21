@@ -50,7 +50,8 @@ jobs:
           sudo install -m 0755 "/tmp/${HADOLINT_BIN}" /usr/local/bin/hadolint
       - name: Lint Dockerfile
         run: |
-          hadolint mcp-server.Dockerfile
+          set -euo pipefail
+          hadolint Dockerfile mcp-server.Dockerfile
 
   # ── Lua linting ────────────────────────────────────────────────────────────
   lint-lua:
@@ -153,11 +154,20 @@ jobs:
           git reset --hard "origin/${BRANCH}"
 
       - name: Stage dummy secrets for compose runtime
-
         run: |
+          set -euo pipefail
           eval "$(sh bootstrap.sh runner)"
+      - name: Build proxy Dockerfile
+        run: |
+          set -euo pipefail
+          docker build -t llm-provost:test .
+      - name: Validate docker compose config
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.versions -f docker-compose.yml config --quiet
       - name: Ensure local dirs for bind mounts
         run: |
+          set -euo pipefail
           mkdir -p logs/fluent-bit-storage/final
           chmod -R a+rwx logs/fluent-bit-storage
       - name: Bring up compose stack
@@ -343,8 +353,6 @@ jobs:
         run: |
           set -euo pipefail
           pip-audit --no-deps --disable-pip -r hash-pip/requirements-runtime.txt
-          printf '%s\n' 'alpa''ca-mcp-server==2.0.1' > /tmp/requirements-mcp-server.txt
-          pip-audit --no-deps --disable-pip -r /tmp/requirements-mcp-server.txt
 
   # ── Secrets detection ──────────────────────────────────────────────────────
   security-gitleaks:
