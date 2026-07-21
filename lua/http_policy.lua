@@ -99,7 +99,7 @@ ngx.var.provost_customer_id = customer_id
 ngx.var.provost_conversation_id = conversation_id
 
 if not is_mcp_path then
-    ngx.var.llm_target_url = os.getenv("LLM_API_URL") or "https://api.openai.com"
+    ngx.var.llm_target_url = os.getenv("LLM_API_URL") or ""
 end
 
 local allowed, reason = rules_engine.check_request(

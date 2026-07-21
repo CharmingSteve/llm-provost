@@ -11,7 +11,7 @@ endpoints:
 
   custom:
     - name: "OpenWire"
-      apiKey: "n/a" # OpenWire doesn't require an API key by default
+      apiKey: "${OPENAI_API_KEY}"
       baseURL: "http://llm-provost:8000/v1"
       models:
         default:

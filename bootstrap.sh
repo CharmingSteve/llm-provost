@@ -75,7 +75,7 @@ load_secrets_manager() {
 }
 
 emit_environment() {
-  for key in $SECRET_KEYS AWS_REGION S3_BUCKET; do
+  for key in $SECRET_KEYS AWS_REGION S3_BUCKET LLM_API_URL; do
     eval "value=\${$key:-}"
     emit_export_or_unset "$key" "$value"
   done
