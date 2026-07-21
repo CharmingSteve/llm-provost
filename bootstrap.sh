@@ -39,7 +39,7 @@ load_env_file() {
     return
   fi
 
-  for key in $SECRET_KEYS AWS_REGION S3_BUCKET; do
+  for key in $SECRET_KEYS AWS_REGION S3_BUCKET LLM_API_URL; do
     value=$(env_get "$key" "$ENV_FILE" || true)
     if [ -n "$value" ]; then
       export "$key=$value"

@@ -89,7 +89,6 @@ services:
       - provost_run:/var/run/provost
       - /etc/localtime:/etc/localtime:ro
     environment:
-      LLM_API_URL: ${LLM_API_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       MCP_ROUTING_TABLE_PATH: /etc/nginx/mcp_routes/mcp_routes.json
       TZ: ${TZ:-Asia/Jerusalem}
