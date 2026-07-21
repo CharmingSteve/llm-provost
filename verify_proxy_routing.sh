@@ -218,27 +218,27 @@ verify_network_isolation() {
         return 0
     fi
 
-    # alpaca-mcp should NOT be on host network
-    host_network=$($DOCKER_BIN inspect -f '{{.HostConfig.NetworkMode}}' alpaca-mcp 2>/dev/null || true)
+    # mcp-server should NOT be on host network
+    host_network=$($DOCKER_BIN inspect -f '{{.HostConfig.NetworkMode}}' mcp-server 2>/dev/null || true)
     if [ -z "$host_network" ]; then
-        echo "[verify] WARN: unable to inspect alpaca-mcp network mode; skipping network isolation check"
+        echo "[verify] WARN: unable to inspect mcp-server network mode; skipping network isolation check"
         return 0
     fi
     
     if [ "$host_network" = "host" ]; then
-        echo "[verify] FAIL: alpaca-mcp is exposed on host network"
+        echo "[verify] FAIL: mcp-server is exposed on host network"
         return 1
     fi
-    echo "[verify] alpaca-mcp network_mode=$host_network (not host: OK)"
+    echo "[verify] mcp-server network_mode=$host_network (not host: OK)"
 
-    # Verify alpaca-mcp CANNOT reach external IPs directly (should timeout/fail)
+    # Verify mcp-server CANNOT reach external IPs directly (should timeout/fail)
     # This tests that direct egress is blocked by network policy
-    cannot_reach_external=$($DOCKER_BIN exec alpaca-mcp sh -c 'timeout 2 curl -s https://www.google.com 2>&1' 2>/dev/null || echo "connection_failed")
+    cannot_reach_external=$($DOCKER_BIN exec mcp-server sh -c 'timeout 2 curl -s https://www.google.com 2>&1' 2>/dev/null || echo "connection_failed")
     if echo "$cannot_reach_external" | grep -qE "connection refused|name resolution|timeout|connection_failed|Could not resolve|Failed to connect"; then
-        echo "[verify] alpaca-mcp cannot reach external endpoints directly (OK: jailed)"
+        echo "[verify] mcp-server cannot reach external endpoints directly (OK: jailed)"
         return 0
     else
-        echo "[verify] WARN: alpaca-mcp may have direct external access (not jailed properly)"
+        echo "[verify] WARN: mcp-server may have direct external access (not jailed properly)"
         return 0
     fi
 }

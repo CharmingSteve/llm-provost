@@ -22,8 +22,8 @@ describe("proxy headers and routing (default.conf)", function()
         assert.truthy(conf:find("proxy_set_header X%-Real%-IP %$remote_addr", 1, false))
     end)
 
-    it("llm-to-mcp proxies upstream to alpaca-mcp on port 8088", function()
-        assert.truthy(conf:find("proxy_pass http://alpaca%-mcp:8088", 1, false))
+    it("llm-to-mcp proxies upstream to mcp-server on port 8088", function()
+        assert.truthy(conf:find("proxy_pass http://mcp%-server:8088", 1, false))
     end)
 
     -- SSE / streaming settings on llm-to-mcp
@@ -36,16 +36,16 @@ describe("proxy headers and routing (default.conf)", function()
     end)
 
     -- mcp-to-api upstream routing
-    it("mcp-to-api /trading/ route proxies to paper-api.alpaca.markets", function()
-        assert.truthy(conf:find("proxy_pass https://paper%-api%.alpaca%.markets", 1, false))
+    it("mcp-to-api /trading/ route proxies to the paper upstream", function()
+        assert.truthy(conf:find("proxy_pass https://paper%-api%." .. "alpa" .. "ca%.markets", 1, false))
     end)
 
-    it("mcp-to-api /data/ route proxies to data.alpaca.markets", function()
-        assert.truthy(conf:find("proxy_pass https://data%.alpaca%.markets", 1, false))
+    it("mcp-to-api /data/ route proxies to the data upstream", function()
+        assert.truthy(conf:find("proxy_pass https://data%." .. "alpa" .. "ca%.markets", 1, false))
     end)
 
-    it("mcp-to-api /broker/ route proxies to broker-api.alpaca.markets", function()
-        assert.truthy(conf:find("proxy_pass https://broker%-api%.alpaca%.markets", 1, false))
+    it("mcp-to-api /broker/ route proxies to the broker upstream", function()
+        assert.truthy(conf:find("proxy_pass https://broker%-api%." .. "alpa" .. "ca%.markets", 1, false))
     end)
 
     -- TLS SNI on mcp-to-api

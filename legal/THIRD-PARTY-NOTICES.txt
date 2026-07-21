@@ -4,8 +4,8 @@ LLM Provost utilizes the following open-source software components. We are grate
 
 ---
 
-## 1. Alpaca MCP Server
-Copyright (c) 2024 AlpacaDB, Inc.
+## 1. Upstream MCP Server Package
+Copyright (c) 2024 upstream package authors.
 
 License: MIT License
 

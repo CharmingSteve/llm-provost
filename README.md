@@ -66,7 +66,7 @@ LLM Provost acts as a remote MCP server. Point your MCP client at the instance I
 ### Step 3: Verify Policy Enforcement
 1. Restart your MCP client.
 2. Ask the client to list available tools through the remote MCP server.
-3. Attempt a blocked operation such as `delete_patient_record` or `export_full_database`.
+3. Attempt a blocked operation such as `delete_record` or `export_full_database`.
 4. Confirm that LLM Provost denies the request and records the attempt in the audit logs.
 
 ***
@@ -140,13 +140,13 @@ See [RULES_ENGINE.md](RULES_ENGINE.md) for the full schema and example policies.
 
 ### Example Governance Posture
 
-A realistic healthcare-oriented policy can:
+A realistic governance policy can:
 
-- permit `get_patient_records`, `list_patient_appointments`, and `summarize_encounter`
-- deny `delete_patient_record` and `export_full_database`
-- limit patient-record lookups to 10 calls per minute per user
+- permit `get_records`, `list_items`, and `summarize_report`
+- deny `delete_record` and `export_full_database`
+- limit record lookups to 10 calls per minute per user
 - cap `max_tokens` to 4096 per request
-- allow `export_audit_bundle` only during business hours
+- allow `export_summary` only during business hours
 
 ---
 

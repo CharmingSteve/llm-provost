@@ -34,8 +34,8 @@ local function load_policy_credentials()
         return cached_api_key, cached_secret_key
     end
 
-    local api_key = read_secret_file("/run/secrets/alpaca_api_key") or os.getenv("ALPACA_API_KEY")
-    local secret_key = read_secret_file("/run/secrets/alpaca_secret_key") or os.getenv("ALPACA_SECRET_KEY")
+    local api_key = read_secret_file("/run/secrets/mcp_api_key") or os.getenv("MCP_API_KEY")
+    local secret_key = read_secret_file("/run/secrets/mcp_secret_key") or os.getenv("MCP_SECRET_KEY")
 
     if api_key and secret_key then
         cached_api_key = api_key
@@ -178,7 +178,7 @@ local function get_account_id()
     end
 
     local cache = ngx.shared.provost_ctx
-    local cache_key = "alpaca:account_id"
+    local cache_key = "mcp:account_id"
 
     if cache then
         local cached = cache:get(cache_key)

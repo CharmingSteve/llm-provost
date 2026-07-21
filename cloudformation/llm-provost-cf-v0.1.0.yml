@@ -45,15 +45,15 @@ Parameters:
       scale up only if needed.
 
   # ── Secrets ───────────────────────────────────────────────────────────────────
-  AlpacaApiKey:
+  MCPApiKey:
     Type: String
     NoEcho: true
-    Description: Alpaca Markets API key (paper or live).
+    Description: Upstream MCP API key (paper or live).
 
-  AlpacaSecretKey:
+  MCPSecretKey:
     Type: String
     NoEcho: true
-    Description: Alpaca Markets secret key (paper or live).
+    Description: Upstream MCP secret key (paper or live).
 
   ProvostToken:
     Type: String
@@ -62,15 +62,15 @@ Parameters:
       Bearer token used to authenticate requests to the LLM Provost proxy.
       Choose a strong random value (e.g. openssl rand -hex 32).
 
-  AlpacaPaperTrade:
+  MCPPaperTrade:
     Type: String
     Default: 'True'
     AllowedValues:
       - 'True'
       - 'False'
     Description: >
-      Set to True to route orders to Alpaca paper trading; False for live
-      trading. Defaults to True for safety.
+      Set to True to route requests to paper mode; False for live mode.
+      Defaults to True for safety.
 
   MaxTradeNotional:
     Type: Number
@@ -272,10 +272,10 @@ Metadata:
       - Label:
           default: "Secrets & Configuration"
         Parameters:
-          - AlpacaApiKey
-          - AlpacaSecretKey
+          - MCPApiKey
+          - MCPSecretKey
           - ProvostToken
-          - AlpacaPaperTrade
+          - MCPPaperTrade
       - Label:
           default: "Rules Engine"
         Parameters:
@@ -317,14 +317,14 @@ Metadata:
         default: "Instance Type"
       MCPAccessLocation:
         default: "MCP Access CIDR (Port 8088)"
-      AlpacaApiKey:
-        default: "Alpaca API Key"
-      AlpacaSecretKey:
-        default: "Alpaca Secret Key"
+      MCPApiKey:
+        default: "MCP API Key"
+      MCPSecretKey:
+        default: "MCP Secret Key"
       ProvostToken:
         default: "Provost Token"
-      AlpacaPaperTrade:
-        default: "Enable Paper Trading"
+      MCPPaperTrade:
+        default: "Enable Paper Mode"
       MaxTradeNotional:
         default: "Max Trade Notional"
       MaxSharesPerTrade:
@@ -370,9 +370,9 @@ Resources:
     Type: AWS::SecretsManager::Secret
     Properties:
       Name: !Sub "llm-provost-secret-${AWS::StackName}"
-      Description: "LLM Provost runtime secrets (Alpaca keys + Provost token)"
+      Description: "LLM Provost runtime secrets (MCP keys + Provost token)"
       SecretString: !Sub |
-        {"ALPACA_API_KEY":"${AlpacaApiKey}","ALPACA_SECRET_KEY":"${AlpacaSecretKey}","ALPACA_PAPER_TRADE":"${AlpacaPaperTrade}","PROVOST_TOKEN":"${ProvostToken}","S3_BUCKET":"${LogsBucket}","AWS_REGION":"${AWS::Region}","MaxTradeNotional":${MaxTradeNotional},"MaxSharesPerTrade":${MaxSharesPerTrade},"RateLimitRPM":${RateLimitRPM},"EnableAllowlist":"${EnableAllowlist}","AllowedSymbols":"${AllowedSymbols}","BlockedSymbols":"${BlockedSymbols}","AllowedAssetClasses":"${AllowedAssetClasses}","ForbiddenTools":"${ForbiddenTools}","MaxReplaceNotional":${MaxReplaceNotional},"PreventMarketOrderUpgrade":"${PreventMarketOrderUpgrade}","MaxCloseNotional":${MaxCloseNotional},"AllowedCloseTickers":"${AllowedCloseTickers}","LogDNERequests":"${LogDNERequests}"}
+        {"MCP_API_KEY":"${MCPApiKey}","MCP_SECRET_KEY":"${MCPSecretKey}","MCP_PAPER_TRADE":"${MCPPaperTrade}","PROVOST_TOKEN":"${ProvostToken}","S3_BUCKET":"${LogsBucket}","AWS_REGION":"${AWS::Region}","MaxTradeNotional":${MaxTradeNotional},"MaxSharesPerTrade":${MaxSharesPerTrade},"RateLimitRPM":${RateLimitRPM},"EnableAllowlist":"${EnableAllowlist}","AllowedSymbols":"${AllowedSymbols}","BlockedSymbols":"${BlockedSymbols}","AllowedAssetClasses":"${AllowedAssetClasses}","ForbiddenTools":"${ForbiddenTools}","MaxReplaceNotional":${MaxReplaceNotional},"PreventMarketOrderUpgrade":"${PreventMarketOrderUpgrade}","MaxCloseNotional":${MaxCloseNotional},"AllowedCloseTickers":"${AllowedCloseTickers}","LogDNERequests":"${LogDNERequests}"}
       Tags:
         - Key: Project
           Value: llm-provost
@@ -625,7 +625,7 @@ Resources:
       SecurityGroupEgress:
         - IpProtocol: "-1"
           CidrIp: 0.0.0.0/0
-          Description: "Allow all outbound (internet access for Alpaca + AWS APIs)"
+          Description: "Allow all outbound (internet access for upstream APIs and AWS APIs)"
       Tags:
         - Key: Name
           Value: !Sub "llm-provost-sg-${AWS::StackName}"

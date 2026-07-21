@@ -18,15 +18,15 @@ sync_local_fallback_secrets() {
   src_dir="$1"
   mkdir -p "$LOCAL_FALLBACK_SECRETS_DIR"
   chmod 700 "$LOCAL_FALLBACK_SECRETS_DIR"
-  cp "$src_dir/alpaca_api_key" "$LOCAL_FALLBACK_SECRETS_DIR/alpaca_api_key"
-  cp "$src_dir/alpaca_secret_key" "$LOCAL_FALLBACK_SECRETS_DIR/alpaca_secret_key"
-  cp "$src_dir/alpaca_paper_trade" "$LOCAL_FALLBACK_SECRETS_DIR/alpaca_paper_trade"
+  cp "$src_dir/mcp_api_key" "$LOCAL_FALLBACK_SECRETS_DIR/mcp_api_key"
+  cp "$src_dir/mcp_secret_key" "$LOCAL_FALLBACK_SECRETS_DIR/mcp_secret_key"
+  cp "$src_dir/mcp_paper_trade" "$LOCAL_FALLBACK_SECRETS_DIR/mcp_paper_trade"
   if [ ! -f "$LOCAL_FALLBACK_SECRETS_DIR/provost_token" ]; then
     cp "$src_dir/provost_token" "$LOCAL_FALLBACK_SECRETS_DIR/provost_token"
   fi
-  chmod 600 "$LOCAL_FALLBACK_SECRETS_DIR/alpaca_api_key" \
-    "$LOCAL_FALLBACK_SECRETS_DIR/alpaca_secret_key" \
-    "$LOCAL_FALLBACK_SECRETS_DIR/alpaca_paper_trade"
+  chmod 600 "$LOCAL_FALLBACK_SECRETS_DIR/mcp_api_key" \
+    "$LOCAL_FALLBACK_SECRETS_DIR/mcp_secret_key" \
+    "$LOCAL_FALLBACK_SECRETS_DIR/mcp_paper_trade"
 }
 
 is_true() {
@@ -81,7 +81,7 @@ create_run_dir() {
 
 has_staged_secrets() {
   [ -n "${PROVOST_SECRETS_DIR:-}" ] && [ -d "$PROVOST_SECRETS_DIR" ] && \
-    [ -f "$PROVOST_SECRETS_DIR/alpaca_api_key" ] && [ -f "$PROVOST_SECRETS_DIR/alpaca_secret_key" ] && \
+    [ -f "$PROVOST_SECRETS_DIR/mcp_api_key" ] && [ -f "$PROVOST_SECRETS_DIR/mcp_secret_key" ] && \
     [ -f "$PROVOST_SECRETS_DIR/provost_token" ]
 }
 
@@ -103,9 +103,9 @@ case "$MODE" in
     create_secrets_dir dev
     create_run_dir dev
 
-    ALPACA_API_KEY=$(env_get ALPACA_API_KEY "$ENV_FILE" || true)
-    ALPACA_SECRET_KEY=$(env_get ALPACA_SECRET_KEY "$ENV_FILE" || true)
-    ALPACA_PAPER_TRADE=$(env_get ALPACA_PAPER_TRADE "$ENV_FILE" || true)
+    MCP_API_KEY=$(env_get MCP_API_KEY "$ENV_FILE" || true)
+    MCP_SECRET_KEY=$(env_get MCP_SECRET_KEY "$ENV_FILE" || true)
+    MCP_PAPER_TRADE=$(env_get MCP_PAPER_TRADE "$ENV_FILE" || true)
     PROVOST_TOKEN_VALUE=$(env_get PROVOST_TOKEN "$ENV_FILE" || true)
 
     AWS_REGION_VALUE=$(env_get AWS_REGION "$ENV_FILE" || true)
@@ -115,9 +115,9 @@ case "$MODE" in
     AWS_SESSION_TOKEN_VALUE=$(env_get AWS_SESSION_TOKEN "$ENV_FILE" || true)
     INSTANCE_ID_VALUE=$(env_get INSTANCE_ID "$ENV_FILE" || true)
 
-    write_secret_file "${ALPACA_API_KEY:-}" "$PROVOST_SECRETS_DIR/alpaca_api_key"
-    write_secret_file "${ALPACA_SECRET_KEY:-}" "$PROVOST_SECRETS_DIR/alpaca_secret_key"
-    write_secret_file "${ALPACA_PAPER_TRADE:-true}" "$PROVOST_SECRETS_DIR/alpaca_paper_trade"
+    write_secret_file "${MCP_API_KEY:-}" "$PROVOST_SECRETS_DIR/mcp_api_key"
+    write_secret_file "${MCP_SECRET_KEY:-}" "$PROVOST_SECRETS_DIR/mcp_secret_key"
+    write_secret_file "${MCP_PAPER_TRADE:-true}" "$PROVOST_SECRETS_DIR/mcp_paper_trade"
     write_secret_file "${PROVOST_TOKEN_VALUE:-dev-provost-token}" "$PROVOST_SECRETS_DIR/provost_token"
     sync_local_fallback_secrets "$PROVOST_SECRETS_DIR"
 
@@ -141,14 +141,14 @@ case "$MODE" in
     create_secrets_dir runner
     create_run_dir runner
 
-    API_KEY="${ALPACA_API_KEY:-dummy}"
-    SECRET_KEY="${ALPACA_SECRET_KEY:-dummy}"
-    PAPER_TRADE="${ALPACA_PAPER_TRADE:-true}"
+    API_KEY="${MCP_API_KEY:-dummy}"
+    SECRET_KEY="${MCP_SECRET_KEY:-dummy}"
+    PAPER_TRADE="${MCP_PAPER_TRADE:-true}"
     PROVOST_TOKEN_VALUE="${PROVOST_TOKEN:-dummy-provost-token}"
 
-    write_secret_file "$API_KEY" "$PROVOST_SECRETS_DIR/alpaca_api_key"
-    write_secret_file "$SECRET_KEY" "$PROVOST_SECRETS_DIR/alpaca_secret_key"
-    write_secret_file "$PAPER_TRADE" "$PROVOST_SECRETS_DIR/alpaca_paper_trade"
+    write_secret_file "$API_KEY" "$PROVOST_SECRETS_DIR/mcp_api_key"
+    write_secret_file "$SECRET_KEY" "$PROVOST_SECRETS_DIR/mcp_secret_key"
+    write_secret_file "$PAPER_TRADE" "$PROVOST_SECRETS_DIR/mcp_paper_trade"
     write_secret_file "$PROVOST_TOKEN_VALUE" "$PROVOST_SECRETS_DIR/provost_token"
 
     # Production safety default: do not copy real secrets into repo-local .secrets
@@ -189,13 +189,13 @@ case "$MODE" in
     chmod 700 "$PROVOST_SECRETS_DIR" 2>/dev/null || true
     chmod 755 "$PROVOST_RUN_DIR" 2>/dev/null || true
 
-    SECRET_NAME="${PROVOST_SECRET_NAME:-llm-provost/alpaca}"
+    SECRET_NAME="${PROVOST_SECRET_NAME:-llm-provost/mcp}"
     REGION="${AWS_REGION:-us-east-1}"
     SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id "$SECRET_NAME" --region "$REGION" --query SecretString --output text 2>&1)
 
-    API_KEY=$(printf '%s' "$SECRET_JSON" | grep -o '"ALPACA_API_KEY":"[^"]*' | cut -d'"' -f4 || echo "")
-    SECRET_KEY=$(printf '%s' "$SECRET_JSON" | grep -o '"ALPACA_SECRET_KEY":"[^"]*' | cut -d'"' -f4 || echo "")
-    PAPER_TRADE=$(printf '%s' "$SECRET_JSON" | grep -o '"ALPACA_PAPER_TRADE":"[^"]*' | cut -d'"' -f4 || echo "true")
+    API_KEY=$(printf '%s' "$SECRET_JSON" | grep -o '"MCP_API_KEY":"[^"]*' | cut -d'"' -f4 || echo "")
+    SECRET_KEY=$(printf '%s' "$SECRET_JSON" | grep -o '"MCP_SECRET_KEY":"[^"]*' | cut -d'"' -f4 || echo "")
+    PAPER_TRADE=$(printf '%s' "$SECRET_JSON" | grep -o '"MCP_PAPER_TRADE":"[^"]*' | cut -d'"' -f4 || echo "true")
     PROVOST_TOKEN_VALUE=$(printf '%s' "$SECRET_JSON" | grep -o '"PROVOST_TOKEN":"[^"]*' | cut -d'"' -f4 || echo "")
     S3_BUCKET_VALUE=$(printf '%s' "$SECRET_JSON" | grep -o '"S3_BUCKET":"[^"]*' | cut -d'"' -f4 || echo "")
 
@@ -204,9 +204,9 @@ case "$MODE" in
       exit 1
     fi
 
-    write_secret_file "$API_KEY" "$PROVOST_SECRETS_DIR/alpaca_api_key"
-    write_secret_file "$SECRET_KEY" "$PROVOST_SECRETS_DIR/alpaca_secret_key"
-    write_secret_file "$PAPER_TRADE" "$PROVOST_SECRETS_DIR/alpaca_paper_trade"
+    write_secret_file "$API_KEY" "$PROVOST_SECRETS_DIR/mcp_api_key"
+    write_secret_file "$SECRET_KEY" "$PROVOST_SECRETS_DIR/mcp_secret_key"
+    write_secret_file "$PAPER_TRADE" "$PROVOST_SECRETS_DIR/mcp_paper_trade"
     write_secret_file "$PROVOST_TOKEN_VALUE" "$PROVOST_SECRETS_DIR/provost_token"
 
     # Production safety default: keep secrets on tmpfs only.

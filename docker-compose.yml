@@ -1,20 +1,20 @@
 services:
-  alpaca-mcp:
-    # LLM Provost MCP image is built with docker build and pushed to ECR. Digest is sourced from .env.versions via: docker compose --env-file .env.versions. It is built from the alpaca-mcp.Dockerfile in the root of this repo.
-    image: ${ALPACA_IMAGE}@${ALPACA_IMAGE_TAG}
+  mcp-server:
+    # LLM Provost MCP image is built with docker build and pushed to ECR. Digest is sourced from .env.versions via: docker compose --env-file .env.versions. It is built from the mcp-server.Dockerfile in the root of this repo.
+    image: ${MCP_IMAGE}@${MCP_IMAGE_TAG}
     pull_policy: if_not_present
-    container_name: alpaca-mcp
+    container_name: mcp-server
     volumes:
       - ./entrypoint.sh:/entrypoint.sh:ro
       - ${PROVOST_SECRETS_DIR:-./.secrets}:/run/secrets:ro
       - /etc/localtime:/etc/localtime:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     environment:
-      TRADE_API_URL: "http://llm-provost:8081/trading"
-      DATA_API_URL: "http://llm-provost:8081/data"
-      BROKER_API_URL: "http://llm-provost:8081/broker"
-      ALPACA_API_KEY: ${ALPACA_API_KEY:-}
-      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
+      MCP_API_URL: "http://llm-provost:8081/trading"
+      MCP_DATA_URL: "http://llm-provost:8081/data"
+      MCP_BROKER_URL: "http://llm-provost:8081/broker"
+      MCP_API_KEY: ${MCP_API_KEY:-}
+      MCP_SECRET_KEY: ${MCP_SECRET_KEY:-}
       TZ: ${TZ:-Asia/Jerusalem}
     expose:
       - "8088"
@@ -74,7 +74,7 @@ services:
     pull_policy: if_not_present
     container_name: llm-provost
     depends_on:
-      alpaca-mcp:
+      mcp-server:
         condition: service_started
       fluent-bit:
         condition: service_healthy

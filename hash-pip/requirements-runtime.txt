@@ -1,4 +1,4 @@
-# Hash-verified runtime dependencies for alpaca-mcp image builds.
+# Hash-verified runtime dependencies for MCP server image builds.
 #
 # IMPORTANT: Keep each package block annotated with the exact version represented
 # by the hashes. This mirrors image digest pinning discipline for pip artifacts.
@@ -36,12 +36,6 @@ uv==0.11.15 \
     --hash=sha256:cc3915ab291a1ecaf31de05f5d8bd70d09c66fe9911a53f70d9efa62ff0dbd8a \
     --hash=sha256:e3b68f8bf1a4568710f77e5bda9182ce7682811d89a8e7468c22460e032b234d \
     --hash=sha256:f9f4fbbf4fe485522054f3c7496c6e8e932d6436e4200ff3daf718db0b7c7bd5
-
-# Package: alpaca-mcp-server
-# Version represented by these hashes: 2.0.1
-alpaca-mcp-server==2.0.1 \
-    --hash=sha256:5e37283700fc11999e8ab1e7a4b35d9454257b7402c74d4c301af2024229de05 \
-    --hash=sha256:d86d6a45ab58ce6b875ad79076183827963b7d802c5beeb69e1b54e8aae29278
 
 # Package: setuptools
 # Version represented by these hashes: 83.0.0

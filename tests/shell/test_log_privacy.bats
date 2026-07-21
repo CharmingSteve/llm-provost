@@ -20,7 +20,7 @@ setup() {
 @test "log privacy: multiline payload content remains valid JSON line structure" {
   TMPDIR="$(mktemp -d)"
   mkdir -p "$TMPDIR/nginx-logs"
-  LOG_FILE="$TMPDIR/nginx-logs/llm_to_alpaca_access.log"
+  LOG_FILE="$TMPDIR/nginx-logs/llm_to_mcp_access.log"
 
   cat > "$LOG_FILE" <<'EOF'
 {"time_local":"t","remote_addr":"127.0.0.1","request":"POST /mcp HTTP/1.1","status":"200","body_bytes_sent":"1","request_time":"0.01","upstream_response_time":"0.01","request_body":"{\"note\":\"line1\\nline2\",\"APCA-API-SECRET-KEY\":\"[REDACTED]\"}","resp_body":"{\"ok\":true}"}

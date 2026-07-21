@@ -30,13 +30,13 @@ If present, only the listed tools are permitted.
 ```json
 "tool_allowlist": {
   "enabled": true,
-  "description": "Allow only approved read-oriented healthcare tools.",
+  "description": "Allow only approved read-oriented MCP tools.",
   "params": {
     "tools": [
-      "get_patient_records",
-      "list_patient_appointments",
-      "summarize_encounter",
-      "export_audit_bundle"
+      "get_records",
+      "list_items",
+      "summarize_report",
+      "export_summary"
     ]
   }
 }
@@ -52,7 +52,7 @@ Blocked tools are denied even if they also appear in an allowlist.
   "description": "Block destructive or bulk-export operations.",
   "params": {
     "tools": [
-      "delete_patient_record",
+      "delete_record",
       "export_full_database"
     ]
   }
@@ -69,11 +69,11 @@ Per-tool rate limits let operators throttle expensive or sensitive tools.
   "description": "Apply per-tool rate windows.",
   "params": {
     "rules": {
-      "get_patient_records": {
+      "get_records": {
         "max_calls": 10,
         "window_seconds": 60
       },
-      "summarize_encounter": {
+      "summarize_report": {
         "max_calls": 20,
         "window_seconds": 300
       }
@@ -108,7 +108,7 @@ Restrict tool use to approved windows.
   "params": {
     "rules": [
       {
-        "tool": "export_audit_bundle",
+        "tool": "export_summary",
         "allowed_hours": "09:00-17:00",
         "timezone": "America/New_York"
       }
@@ -138,7 +138,7 @@ These settings define audit expectations for every request.
 
 ## Complete Example
 
-The shipped `rules.json` includes all six required top-level fields with a healthcare governance example.
+The shipped `rules.json` includes all six required top-level fields with a generic governance example.
 
 1. Tool allowlist for approved read-oriented tools.
 2. Tool blocklist for destructive operations.
