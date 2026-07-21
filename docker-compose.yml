@@ -115,6 +115,13 @@ services:
       - app_net
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 
   meilisearch:
     image: getmeili/meilisearch:v1.35.1
@@ -129,6 +136,7 @@ services:
       - app_net
     security_opt:
       - no-new-privileges:true
+  
 
   api:
     image: ghcr.io/danny-avila/librechat-dev:latest
@@ -137,8 +145,10 @@ services:
     ports:
       - "3080:3080"
     depends_on:
-      - mongodb
-      - meilisearch
+      mongodb:
+        condition: service_healthy
+      meilisearch:
+        condition: service_started
     environment:
       # Static config (never changes)
       PORT: "3080"
@@ -149,6 +159,7 @@ services:
       MEILI_HOST: "http://meilisearch:7700"
       MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-provost-dev-meili-key}"
       ENDPOINTS: "openAI"
+      JWT_SECRET: "${JWT_SECRET:-change-this-to-a-random-string}"
       # Secrets (from .env file)
       OPENID_CLIENT_ID: "${OPENID_CLIENT_ID:-}"
       OPENID_CLIENT_SECRET: "${OPENID_CLIENT_SECRET:-}"
@@ -158,10 +169,12 @@ services:
       OPENID_SCOPE: "openid profile email"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OPENAI_REVERSE_PROXY: "${OPENAI_REVERSE_PROXY:-}"
+      MCP_ALLOWED_DOMAINS: "http://llm-provost:8000"
     volumes:
       - ./config/librechat.yaml:/app/librechat.yaml:ro
       - librechat_images:/app/client/public/images
       - librechat_uploads:/app/uploads
+      - ./.env:/app/.env:ro
     networks:
       - app_net
       - proxy_egress

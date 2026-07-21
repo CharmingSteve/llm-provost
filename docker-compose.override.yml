@@ -1,0 +1,9 @@
+services:
+  mcp-server:
+    build:
+      context: .
+      dockerfile: mcp-server.Dockerfile
+    image: llm-provost-mcp:local
+
+  llm-provost:
+    image: llm-provost:local
