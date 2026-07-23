@@ -1,165 +1,162 @@
-# LLM Provost: Governance Proxy and Audit Ledger for LLM Interactions
+# LLM Provost
+
+Governance proxy and audit ledger for MCP-mediated LLM interactions.
 
 <p align="center">
-   <img src="llm-provost-1-Copilot_20260526_195647.png" alt="LLM Provost lock-eye emblem" width="360" />
+  <img src="llm-provost-1-Copilot_20260526_195647.png" alt="LLM Provost lock-eye emblem" width="360" />
 </p>
 
-> LLM Provost: guardrails for MCP-mediated LLM interactions
+LLM Provost is a mandatory policy and observability boundary that sits in front of MCP servers and upstream model/tool APIs.
+It is designed for secure, sovereign operation: you run it in your own environment, control the policy file, and own the audit logs.
 
-**LLM Provost** is a high-performance, mandatory MITM boundary for **LLM governance** and **audited MCP traffic**. It sits between your LLM client, your Model Context Protocol server, and the upstream tool or API layer so every request can be observed, logged, and policy-checked before it leaves your trust boundary.
+## What It Does
 
-Use it when you need programmable guardrails, identity-aware audit trails, and rapid policy updates without restarting the proxy.
+LLM Provost provides all of the following in one control point:
 
-**👉 Launch on AWS Marketplace:** [LLM Provost AMI](https://aws.amazon.com/marketplace/pp/prodview-ouyql6wbwo6yg)
+1. Governance checks on MCP tool calls
+2. Identity-aware structured audit logs
+3. Two-hop request/response traceability
+4. Hot-reload policy updates without proxy restarts
 
----
+## Four-Point Audit Trail
 
-## Quickstart (TLDR)
+For normal governed traffic, LLM Provost captures and correlates these four events:
 
-## AWS Marketplace Deployment & Usage
+1. LLM client request enters the llm-to-mcp boundary
+2. MCP server request exits through the mcp-to-upstream boundary
+3. Upstream response returns to MCP through the same boundary
+4. MCP response returns to the LLM client through the inbound boundary
 
-LLM Provost is designed to run as a secure, stateless appliance inside your AWS account.
+Correlation fields used across hops:
 
-### Step 1: Deploy the Appliance
-1. Subscribe to LLM Provost on AWS Marketplace and launch the CloudFormation template.
-2. Fill in the deployment parameters, including your `PROVOST_TOKEN` and the governance policy you want enforced at the proxy boundary.
-3. Wait for the stack to reach `CREATE_COMPLETE`.
-4. Open the CloudFormation Outputs tab and copy the public IP address for the appliance.
+- provost_user
+- provost_machine
+- provost_request_id
 
-### Step 2: Connect Your AI Client
-LLM Provost acts as a remote MCP server. Point your MCP client at the instance IP and authenticate with the same `PROVOST_TOKEN` you provided at deploy time.
+## Seven Core Controls
 
-#### For Claude Desktop
-```json
-{
-  "mcpServers": {
-    "llm-provost": {
-      "type": "sse",
-      "url": "http://<YOUR_EC2_PUBLIC_IP>:8000/sse",
-      "env": {
-        "PROVOST_TOKEN": "<YOUR_PROVOST_TOKEN>",
-        "PROVOST_USER": "claude-desktop",
-        "PROVOST_MACHINE": "work-laptop"
-      }
-    }
-  }
-}
-```
+The current implementation and policy model center around these seven controls:
 
-#### For Cursor
-```json
-{
-  "mcpServers": {
-    "llm-provost": {
-      "type": "sse",
-      "url": "http://<YOUR_EC2_PUBLIC_IP>:8000/sse",
-      "env": {
-        "PROVOST_TOKEN": "<YOUR_PROVOST_TOKEN>",
-        "PROVOST_USER": "cursor-ide",
-        "PROVOST_MACHINE": "dev-machine"
-      }
-    }
-  }
-}
-```
+1. Programmable governance guardrails (allow/block tool calls)
+2. Per-tool rate limiting
+3. Token caps for tool requests
+4. Time-based access controls
+5. Identity-rich audit logging
+6. Hot-reload rules from rules.json (10-second mtime polling)
+7. Containerized deployment for repeatable operations
 
-### Step 3: Verify Policy Enforcement
-1. Restart your MCP client.
-2. Ask the client to list available tools through the remote MCP server.
-3. Attempt a blocked operation such as `delete_record` or `export_full_database`.
-4. Confirm that LLM Provost denies the request and records the attempt in the audit logs.
+## Architecture
 
-***
+Two enforcement boundaries are active:
 
-# For installing manually from this repo
+1. llm-to-mcp (inbound): LLM client -> LLM Provost (port 8000) -> MCP server
+2. mcp-to-upstream (outbound): MCP server -> LLM Provost -> approved upstream API/tool endpoint
 
-Clone and run locally:
+This "double-proxy" model gives you policy enforcement before outbound calls leave your trust boundary, and full hop-level observability for audit and incident response.
+
+Reference diagram:
+
+<p align="center">
+  <img src="wiki/agent-provost-architechture.png" alt="LLM Provost deployment and data-flow architecture" width="1200" />
+</p>
+
+## Open Source Quickstart (Docker Compose)
+
+For open-source users who want to run locally:
 
 ```sh
 git clone https://github.com/CharmingSteve/llm-provost.git
 cd llm-provost
+
+# clear prior local secret staging if present
 unset PROVOST_SECRETS_DIR
 docker compose down
+
+# stage env vars for compose from .env
 eval "$(sh bootstrap.sh dev)"
+
+# run stack
 docker compose --env-file .env.versions up -d
-docker exec llm-provost cat /run/secrets/provost_token
 ```
 
-Phase 1 keeps the current upstream compatibility environment variables and secret staging flow used by the existing compose stack. `PROVOST_TOKEN` remains the client-facing authentication secret for this phase.
+Default local entry points:
 
-## Key Features for AI Safety & Compliance
+- LLM Provost gateway: http://localhost:8000
+- LibreChat (if enabled in compose): http://localhost:3080
 
-- **Programmable governance guardrails:** Allow or block tool invocations based on policy.
-- **Per-tool rate limiting:** Slow down abusive or runaway automation before it fans out.
-- **Token caps:** Enforce response-size limits at the boundary.
-- **Time-based access controls:** Restrict sensitive tools to approved hours and time zones.
-- **Identity-aware audit ledger:** Carry `PROVOST_USER`, `PROVOST_MACHINE`, and correlation IDs across hops.
-- **Hot-reload rules:** Update policy by editing `rules.json`; the proxy reloads changes within 10 seconds.
-- **Dockerized deployment:** Run the proxy, MCP server, and log shipper as a compact compose stack.
+To stop:
 
----
+```sh
+docker compose --env-file .env.versions down
+```
 
-## Architecture: The Two-Hop Flow
+## Client and POC Notes
 
-LLM Provost monitors two distinct boundaries:
+The current POC wiring uses OpenWire from VS Code/OpenAI-compatible client flows, but you are not locked into that.
+Any client that can call an OpenAI-compatible endpoint and/or MCP endpoint through LLM Provost can be used.
 
-1. **llm-to-mcp (Inbound):** `LLM Client` -> `LLM Provost (Port 8000)` -> `MCP Server`
-2. **mcp-to-upstream (Outbound):** `MCP Server` -> `LLM Provost (Port 8081)` -> `Approved tool or API layer`
+In this repository, example integration is shown in [config/librechat.yaml](config/librechat.yaml) where:
 
-This double-proxy layout preserves an end-to-end record of each governed interaction while letting you enforce policy before outbound calls leave the trust boundary.
+- OpenWire-style endpoint traffic is routed through http://llm-provost:8000/v1
+- MCP tool traffic is routed through /mcp/<server>
 
-### Four-Step Audit Model
+## Governance Policy Model
 
-For a normal governed request, you should be able to correlate:
+Policy is defined in [rules.json](rules.json) and evaluated by Lua in [lua/rules_engine.lua](lua/rules_engine.lua).
+The schema currently includes:
 
-1. LLM client request to the proxy
-2. MCP server request leaving the proxy
-3. Upstream response returning through the proxy
-4. Final response sent back to the LLM client
+- tool_allowlist
+- tool_blocklist
+- rate_limits
+- token_caps
+- time_based_rules
+- logging_rules
 
-The shared correlation fields are:
+Policy reload behavior:
 
-- `provost_user`
-- `provost_machine`
-- `provost_request_id`
+- rule loader polls rules.json every 10 seconds
+- valid updates become active without nginx reload
+- invalid updates are rejected and last known good policy remains active
 
----
+See [RULES_ENGINE.md](RULES_ENGINE.md) for full rule documentation.
 
-## Safety Controls & Governance
+## Logging and Sovereignty
 
-LLM Provost enforces policy from `rules.json` on every request. The Phase 1 governance schema is:
+LLM Provost emits structured JSON logs with request and response body capture for governed paths.
+In the default stack, Fluent Bit ships logs to local files and optional S3 outputs.
 
-- `tool_allowlist`: Explicitly permitted MCP tools.
-- `tool_blocklist`: Explicitly denied MCP tools.
-- `rate_limits`: Per-tool request windows.
-- `token_caps`: Maximum token budgets per request.
-- `time_based_rules`: Tool-specific hour windows with time zone handling.
-- `logging_rules`: Required audit fields and logging behavior.
+Key operational intent:
 
-See [RULES_ENGINE.md](RULES_ENGINE.md) for the full schema and example policies.
+- keep policy enforcement and logs inside your cloud account
+- maintain immutable audit posture with versioned object storage and encryption controls
+- minimize trust in upstream components by enforcing at the proxy boundary
 
-### Example Governance Posture
+## AWS Marketplace Deployment
 
-A realistic governance policy can:
+LLM Provost is also available as an AWS Marketplace AMI:
 
-- permit `get_records`, `list_items`, and `summarize_report`
-- deny `delete_record` and `export_full_database`
-- limit record lookups to 10 calls per minute per user
-- cap `max_tokens` to 4096 per request
-- allow `export_summary` only during business hours
+https://aws.amazon.com/marketplace/pp/prodview-ouyql6wbwo6yg
 
----
+High-level flow:
 
-## Audit Log Layout
+1. Subscribe and launch CloudFormation
+2. Set PROVOST_TOKEN and governance parameters
+3. Wait for CREATE_COMPLETE
+4. Point your MCP/LLM client at the deployed endpoint
 
-Local development defaults use the `llm-provost-local` bucket name, and shipped audit objects are stored under the `llm-provost/logs/` prefix. This keeps branding, compose defaults, and CloudFormation outputs aligned.
+## Security Posture Highlights
 
-## Operations Notes
+- no-new-privileges and dropped Linux caps for core containers
+- read-only root filesystem on proxy and log shipper containers
+- tmpfs for transient runtime data
+- internal Docker network for mcp_internal traffic
+- explicit policy evaluation before MCP tool execution
 
-- `PROVOST_TOKEN` is intentionally unchanged in Phase 1.
-- Policy reloads are driven by a 10-second file `mtime` poll; no nginx reload is required.
-- If `rules.json` becomes invalid, the last good policy remains active.
+## License
+
+This project is licensed under GNU Affero General Public License v3.0 (AGPL-3.0).
+See [LICENSE](LICENSE).
 
 ## Support
 
-Open an issue or discussion in the repository if you need a different governance policy model or a more restrictive deployment posture for your environment.
+Open an issue or discussion if you need changes to the governance model, deployment shape, or compliance posture.
