@@ -159,7 +159,7 @@ services:
       SEARCH: "true"
       MEILI_HOST: "http://meilisearch:7700"
       MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-provost-dev-meili-key}"
-      ENDPOINTS: "openAI"
+      ENDPOINTS: "custom"
       OPENID_CLIENT_ID: "${OPENID_CLIENT_ID:-}"
       OPENID_CLIENT_SECRET: "${OPENID_CLIENT_SECRET:-}"
       OPENID_ISSUER: "${OPENID_ISSUER:-}"
