@@ -127,7 +127,7 @@ run_ssm_script() {
     aws_cli ssm send-command \
       --instance-ids "${INSTANCE_ID}" \
       --document-name 'AWS-RunShellScript' \
-      --comment 'agent-provost-ami-build' \
+      --comment 'llm-provost-ami-build' \
       --timeout-seconds 3600 \
       --parameters "${CMD_JSON}" \
       --query 'Command.CommandId' \
@@ -181,8 +181,8 @@ if [[ ! "${VERSION}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?(\+[0-9A-Z
 fi
 
 SECURITY_GROUP_ID="$(aws_cli ec2 create-security-group \
-  --group-name "agent-provost-ami-${TIMESTAMP}" \
-  --description 'Temporary SG for agent-provost AMI build (egress-only)' \
+  --group-name "llm-provost-ami-${TIMESTAMP}" \
+  --description 'Temporary SG for llm-provost AMI build (egress-only)' \
   --query 'GroupId' \
   --output text)"
 
@@ -205,7 +205,7 @@ INSTANCE_ID="$(aws_cli ec2 run-instances \
   --associate-public-ip-address \
   --security-group-ids "${SECURITY_GROUP_ID}" \
   --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":16,"VolumeType":"gp3","DeleteOnTermination":true}}]' \
-  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=agent-provost-ami-builder},{Key=Project,Value=agent-provost}]" \
+  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=llm-provost-ami-builder},{Key=Project,Value=llm-provost}]" \
   --query 'Instances[0].InstanceId' \
   --output text)"
 
@@ -239,9 +239,9 @@ systemctl enable --now docker"
 
 run_ssm_script "#!/usr/bin/env bash
 set -xe
-if [ -d /opt/agent-provost ]; then rm -rf /opt/agent-provost; fi
-git clone --depth 1 --no-single-branch --branch '${SOURCE_REF}' https://github.com/CharmingSteve/agent-provost /opt/agent-provost
-cd /opt/agent-provost
+if [ -d /opt/llm-provost ]; then rm -rf /opt/llm-provost; fi
+git clone --depth 1 --no-single-branch --branch '${SOURCE_REF}' https://github.com/CharmingSteve/llm-provost /opt/llm-provost
+cd /opt/llm-provost
 docker compose --env-file .env.versions pull"
 
 run_ssm_script "#!/usr/bin/env bash
@@ -252,15 +252,15 @@ if ! id -u provost >/dev/null 2>&1; then
 fi
 
 usermod -aG docker provost
-chown -R provost:provost /opt/agent-provost
+chown -R provost:provost /opt/llm-provost
 
 install -d -m 755 /var/lib/cloud/scripts/per-boot
-cp /opt/agent-provost/scripts/sync_state.sh /var/lib/cloud/scripts/per-boot/01-agent-provost-boot.sh
-chmod 755 /opt/agent-provost/scripts/sync_state.sh /var/lib/cloud/scripts/per-boot/01-agent-provost-boot.sh
-cp /opt/agent-provost/scripts/provost-compose.sh /usr/local/bin/provost-compose
+cp /opt/llm-provost/scripts/sync_state.sh /var/lib/cloud/scripts/per-boot/01-llm-provost-boot.sh
+chmod 755 /opt/llm-provost/scripts/sync_state.sh /var/lib/cloud/scripts/per-boot/01-llm-provost-boot.sh
+cp /opt/llm-provost/scripts/provost-compose.sh /usr/local/bin/provost-compose
 chmod +x /usr/local/bin/provost-compose
 
-(crontab -l 2>/dev/null | grep -v '/opt/agent-provost/scripts/sync_state.sh' || true; echo '*/10 * * * * /bin/bash /opt/agent-provost/scripts/sync_state.sh > /var/log/sync_state.log 2>&1') | crontab -"
+(crontab -l 2>/dev/null | grep -v '/opt/llm-provost/scripts/sync_state.sh' || true; echo '*/10 * * * * /bin/bash /opt/llm-provost/scripts/sync_state.sh > /var/log/sync_state.log 2>&1') | crontab -"
 
 run_ssm_script "#!/usr/bin/env bash
 set -xe
@@ -268,7 +268,7 @@ systemctl is-active docker
 docker --version
 docker compose version
 docker images --format '{{.Repository}}:{{.Tag}}'
-test -f /opt/agent-provost/docker-compose.yml"
+test -f /opt/llm-provost/docker-compose.yml"
 
 run_ssm_script "#!/usr/bin/env bash
 set -xe
@@ -298,13 +298,13 @@ else
   create_image_mode=(--no-reboot)
 fi
 
-AMI_NAME="agent-provost-v${VERSION#v}-${TIMESTAMP}"
-AMI_ID="$(aws_cli ec2 create-image --instance-id "${INSTANCE_ID}" "${create_image_mode[@]}" --name "${AMI_NAME}" --description "Agent Provost Golden AMI ${VERSION} ${TIMESTAMP}" --query 'ImageId' --output text)"
+AMI_NAME="llm-provost-v${VERSION#v}-${TIMESTAMP}"
+AMI_ID="$(aws_cli ec2 create-image --instance-id "${INSTANCE_ID}" "${create_image_mode[@]}" --name "${AMI_NAME}" --description "LLM Provost Golden AMI ${VERSION} ${TIMESTAMP}" --query 'ImageId' --output text)"
 write_state
 aws_cli ec2 wait image-available --image-ids "${AMI_ID}"
 
 aws_cli ssm put-parameter \
-  --name '/agent-provost/production/ami-id' \
+  --name '/llm-provost/production/ami-id' \
   --type String \
   --value "${AMI_ID}" \
   --overwrite

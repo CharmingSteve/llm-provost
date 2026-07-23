@@ -23,7 +23,7 @@ local cjson = require("cjson.safe")
 local lfs_ok, lfs = pcall(require, "lfs")
 
 -- Path to the rules configuration file (mounted via docker volume).
-local RULES_FILE = "/etc/rules.json"
+local RULES_FILE = "/etc/nginx/rules.json"
 
 -- How often (seconds) to poll for changes.
 local RELOAD_INTERVAL = 10
@@ -62,7 +62,7 @@ local function get_mtime(path)
     end
     -- Fallback: use a fixed, hardcoded shell command (no user-supplied data).
     -- This branch is only reached if lfs is unexpectedly absent.
-    local handle = io.popen("stat -c %Y /etc/rules.json 2>/dev/null")
+    local handle = io.popen("stat -c %Y /etc/nginx/rules.json 2>/dev/null")
     if not handle then
         return nil
     end

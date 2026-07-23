@@ -46,6 +46,7 @@ mypy_cache/
 
 # Environment
 .env
+!.env.example
 !.env.versions
 local_settings.py
 .secrets/

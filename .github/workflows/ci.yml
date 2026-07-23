@@ -50,7 +50,8 @@ jobs:
           sudo install -m 0755 "/tmp/${HADOLINT_BIN}" /usr/local/bin/hadolint
       - name: Lint Dockerfile
         run: |
-          hadolint alpaca-mcp.Dockerfile
+          set -euo pipefail
+          hadolint Dockerfile mcp-server.Dockerfile
 
   # ── Lua linting ────────────────────────────────────────────────────────────
   lint-lua:
@@ -64,7 +65,9 @@ jobs:
           sudo apt-get install -y lua5.1 luarocks
           sudo luarocks install luacheck
       - name: Lint Lua test files
-        run: luacheck tests/lua/
+        run: |
+          set -euo pipefail
+          luacheck tests/lua/ tests/test_audit_contract.lua tests/test_identity_extraction.lua
 
   # ── Lua unit tests ─────────────────────────────────────────────────────────
   test-lua:
@@ -82,6 +85,22 @@ jobs:
       - name: Run Lua unit tests
         run: busted tests/lua/
 
+  # ── Python unit tests ────────────────────────────────────────────────────
+  test-python:
+    name: pytest (audit contract)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pytest
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y python3-pytest
+      - name: Run Python audit contract
+        run: |
+          set -euo pipefail
+          python3 -m pytest tests/test_audit_logs.py
+
   # ── Shell unit tests ───────────────────────────────────────────────────────
   test-shell:
     name: bats (shell unit tests)
@@ -98,6 +117,11 @@ jobs:
           echo "/tmp/check-jsonschema-venv/bin" >> "$GITHUB_PATH"
       - name: Run bats tests
         run: bats tests/shell/
+      - name: Validate audit JSON schemas
+        run: |
+          set -euo pipefail
+          check-jsonschema --check-metaschema schemas/access_log_schema.json
+          check-jsonschema --check-metaschema schemas/error_log_schema.json
 
   # ── GitHub Actions workflow linting ──────────────────────────────────────
   lint-github-actions:
@@ -153,18 +177,27 @@ jobs:
           git reset --hard "origin/${BRANCH}"
 
       - name: Stage dummy secrets for compose runtime
-
         run: |
+          set -euo pipefail
           eval "$(sh bootstrap.sh runner)"
+      - name: Build proxy Dockerfile
+        run: |
+          set -euo pipefail
+          docker build -t llm-provost:test .
+      - name: Validate docker compose config
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.versions -f docker-compose.yml config --quiet
       - name: Ensure local dirs for bind mounts
         run: |
+          set -euo pipefail
           mkdir -p logs/fluent-bit-storage/final
           chmod -R a+rwx logs/fluent-bit-storage
       - name: Bring up compose stack
         run: |
           set -euo pipefail
-          export ALPACA_API_KEY="dummy"
-          export ALPACA_SECRET_KEY="dummy"
+          export MCP_API_KEY="dummy"
+          export MCP_SECRET_KEY="dummy"
           set +e
           docker compose --env-file .env.versions pull
           docker compose --env-file .env.versions up -d
@@ -173,7 +206,7 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             echo "::warning::Initial compose startup failed; collecting diagnostics and retrying once"
             docker compose --env-file .env.versions ps -a || true
-            docker compose --env-file .env.versions logs --tail 120 fluent-bit agent-provost alpaca-mcp || true
+            docker compose --env-file .env.versions logs --tail 120 fluent-bit llm-provost mcp-server || true
             docker compose --env-file .env.versions down -v --remove-orphans || true
             docker compose --env-file .env.versions pull
             docker compose --env-file .env.versions up -d
@@ -182,8 +215,8 @@ jobs:
         run: |
           set -euo pipefail
           docker compose --env-file .env.versions ps
-          [ "$(docker inspect -f '{{.State.Status}}' alpaca-mcp)" = "running" ]
-          [ "$(docker inspect -f '{{.State.Status}}' agent-provost)" = "running" ]
+          [ "$(docker inspect -f '{{.State.Status}}' mcp-server)" = "running" ]
+          [ "$(docker inspect -f '{{.State.Status}}' llm-provost)" = "running" ]
           [ "$(docker inspect -f '{{.State.Health.Status}}' fluent-bit)" = "healthy" ]
       - name: Tear down compose stack
         if: always()
@@ -195,7 +228,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
-      - name: Set local trivy build tag for alpaca image
+      - name: Set local trivy build tag for mcp-server image
         run: echo "TRIVY_BUILD_TAG=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
       - name: Load image versions from .env.versions
         run: grep -v '^#' .env.versions | grep -v '^$' >> "$GITHUB_ENV"
@@ -240,7 +273,7 @@ jobs:
       - name: Pull and build images for scan
         run: |
           set -euo pipefail
-          docker compose --env-file .env.versions -f docker-compose.yml pull agent-provost
+          docker compose --env-file .env.versions -f docker-compose.yml pull llm-provost
           for attempt in 1 2 3 4 5; do
             if docker pull "${FLUENT_BIT_IMAGE}"; then
               break
@@ -252,8 +285,8 @@ jobs:
             echo "::warning::docker pull ${FLUENT_BIT_IMAGE} failed (attempt ${attempt}/5); retrying"
             sleep 5
           done
-          docker build -f alpaca-mcp.Dockerfile --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" -t agent-provost-alpaca-mcp:"${TRIVY_BUILD_TAG}" .
-      - name: Trivy image scan (agent-provost)
+          docker build -f mcp-server.Dockerfile --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" -t llm-provost-mcp-server:"${TRIVY_BUILD_TAG}" .
+      - name: Trivy image scan (llm-provost)
         run: |
           set +e
           trivy image --exit-code 1 --severity CRITICAL,HIGH "${OPENRESTY_IMAGE}" > /tmp/trivy-openresty.txt 2>&1
@@ -263,17 +296,17 @@ jobs:
           TRIVY_OPENRESTY_CVES="$(grep -oE "CVE-[0-9]{4}-[0-9]{4,}" /tmp/trivy-openresty.txt | sort -u | paste -sd, -)"
           echo "TRIVY_OPENRESTY_CVES=${TRIVY_OPENRESTY_CVES:-none-found}" >> "$GITHUB_ENV"
           trivy image --exit-code 0 --severity CRITICAL,HIGH --format json --output /tmp/trivy-openresty.json "${OPENRESTY_IMAGE}" >/dev/null 2>&1 || true
-      - name: Trivy image scan (alpaca-mcp build output)
+      - name: Trivy image scan (mcp-server build output)
         run: |
           set +e
-          docker image inspect "agent-provost-alpaca-mcp:${TRIVY_BUILD_TAG}" >/dev/null
-          trivy image --exit-code 1 --severity CRITICAL,HIGH "agent-provost-alpaca-mcp:${TRIVY_BUILD_TAG}" > /tmp/trivy-alpaca-mcp.txt 2>&1
-          trivy_alpaca_status=$?
-          cat /tmp/trivy-alpaca-mcp.txt
-          echo "TRIVY_ALPACA_MCP_STATUS=${trivy_alpaca_status}" >> "$GITHUB_ENV"
-          TRIVY_ALPACA_MCP_CVES="$(grep -oE "CVE-[0-9]{4}-[0-9]{4,}" /tmp/trivy-alpaca-mcp.txt | sort -u | paste -sd, -)"
-          echo "TRIVY_ALPACA_MCP_CVES=${TRIVY_ALPACA_MCP_CVES:-none-found}" >> "$GITHUB_ENV"
-          trivy image --exit-code 0 --severity CRITICAL,HIGH --format json --output /tmp/trivy-alpaca-mcp.json "agent-provost-alpaca-mcp:${TRIVY_BUILD_TAG}" >/dev/null 2>&1 || true
+          docker image inspect "llm-provost-mcp-server:${TRIVY_BUILD_TAG}" >/dev/null
+          trivy image --exit-code 1 --severity CRITICAL,HIGH "llm-provost-mcp-server:${TRIVY_BUILD_TAG}" > /tmp/trivy-mcp-server.txt 2>&1
+          trivy_mcp_server_status=$?
+          cat /tmp/trivy-mcp-server.txt
+          echo "TRIVY_MCP_SERVER_STATUS=${trivy_mcp_server_status}" >> "$GITHUB_ENV"
+          TRIVY_MCP_SERVER_CVES="$(grep -oE "CVE-[0-9]{4}-[0-9]{4,}" /tmp/trivy-mcp-server.txt | sort -u | paste -sd, -)"
+          echo "TRIVY_MCP_SERVER_CVES=${TRIVY_MCP_SERVER_CVES:-none-found}" >> "$GITHUB_ENV"
+          trivy image --exit-code 0 --severity CRITICAL,HIGH --format json --output /tmp/trivy-mcp-server.json "llm-provost-mcp-server:${TRIVY_BUILD_TAG}" >/dev/null 2>&1 || true
       - name: Trivy image scan (fluent-bit)
         run: |
           set +e
@@ -300,11 +333,11 @@ jobs:
               jq -r "$JQ_CVE" /tmp/trivy-openresty.json 2>/dev/null || true
             fi
           fi
-          if [ "${TRIVY_ALPACA_MCP_STATUS:-0}" -ne 0 ]; then
+          if [ "${TRIVY_MCP_SERVER_STATUS:-0}" -ne 0 ]; then
             failed=1
-            echo "::error title=Trivy scan failed::Image agent-provost-alpaca-mcp:${TRIVY_BUILD_TAG} has HIGH/CRITICAL CVEs: ${TRIVY_ALPACA_MCP_CVES:-unavailable}"
-            if [ -f /tmp/trivy-alpaca-mcp.json ]; then
-              jq -r "$JQ_CVE" /tmp/trivy-alpaca-mcp.json 2>/dev/null || true
+            echo "::error title=Trivy scan failed::Image llm-provost-mcp-server:${TRIVY_BUILD_TAG} has HIGH/CRITICAL CVEs: ${TRIVY_MCP_SERVER_CVES:-unavailable}"
+            if [ -f /tmp/trivy-mcp-server.json ]; then
+              jq -r "$JQ_CVE" /tmp/trivy-mcp-server.json 2>/dev/null || true
             fi
           fi
           if [ "${TRIVY_FLUENT_BIT_STATUS:-0}" -ne 0 ]; then
@@ -343,8 +376,6 @@ jobs:
         run: |
           set -euo pipefail
           pip-audit --no-deps --disable-pip -r hash-pip/requirements-runtime.txt
-          printf 'alpaca-mcp-server==2.0.1\n' > /tmp/requirements-alpaca-mcp.txt
-          pip-audit --no-deps --disable-pip -r /tmp/requirements-alpaca-mcp.txt
 
   # ── Secrets detection ──────────────────────────────────────────────────────
   security-gitleaks:
@@ -364,23 +395,23 @@ jobs:
 
   # ── Credentials gate (sets output used by integration-tests) ─────────────────
   check-credentials:
-    name: Check Alpaca credentials
+    name: Check MCP credentials
     runs-on: ubuntu-24.04-arm
     outputs:
       enabled: ${{ steps.gate.outputs.enabled }}
     steps:
       - id: gate
         env:
-          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+          MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
         run: |
-          if [ -n "$ALPACA_API_KEY" ] && [ -n "$ALPACA_SECRET_KEY" ]; then
+          if [ -n "$MCP_API_KEY" ] && [ -n "$MCP_SECRET_KEY" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # ── Integration tests (requires Alpaca credentials) ────────────────────────
+  # ── Integration tests (requires MCP credentials) ───────────────────────────
   integration-tests:
     name: Integration tests (end-to-end)
     runs-on: ubuntu-24.04-arm
@@ -423,8 +454,8 @@ jobs:
         run: sudo apt-get install -y jq
       - name: Stage real secrets for integration tests
         env:
-          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+          MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: "us-east-1"
@@ -457,8 +488,8 @@ jobs:
       - name: Run Integration Tests
         env:
           BOOTSTRAP_MODE: runner
-          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+          MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
           S3_BUCKET: "ap-logs-863750994059-us-east-1-ci-test"
           S3_KEY_PREFIX: "ci-run-${{ github.run_id }}/"
           VERIFY_S3_BUCKET: "ap-logs-863750994059-us-east-1-ci-test"
@@ -472,8 +503,8 @@ jobs:
       - name: Run forbidden endpoint test
         env:
           BOOTSTRAP_MODE: runner
-          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+          MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
         run: |
           set -euo pipefail
           eval "$(sh bootstrap.sh runner)"
@@ -486,11 +517,11 @@ jobs:
           echo "=== Docker Compose PS ==="
           docker compose --env-file .env.versions ps -a
 
-          echo "=== Docker Inspect: agent-provost ==="
-          docker inspect agent-provost || true
+          echo "=== Docker Inspect: llm-provost ==="
+          docker inspect llm-provost || true
 
-          echo "=== Docker Inspect: alpaca-mcp ==="
-          docker inspect alpaca-mcp || true
+          echo "=== Docker Inspect: mcp-server ==="
+          docker inspect mcp-server || true
 
           echo "=== Docker Inspect: fluent-bit ==="
           docker inspect fluent-bit || true
@@ -531,8 +562,8 @@ jobs:
 
           echo "=== Downloading Logs from CI S3 Bucket ==="
           mkdir -p downloaded-logs
-          aws s3 sync "s3://ap-logs-863750994059-us-east-1-ci-test/${S3_KEY_PREFIX}agent-provost/logs/access/" downloaded-logs/access/ || true
-          aws s3 sync "s3://ap-logs-863750994059-us-east-1-ci-test/${S3_KEY_PREFIX}agent-provost/logs/error/" downloaded-logs/error/ || true
+          aws s3 sync "s3://ap-logs-863750994059-us-east-1-ci-test/${S3_KEY_PREFIX}llm-provost/logs/access/" downloaded-logs/access/ || true
+          aws s3 sync "s3://ap-logs-863750994059-us-east-1-ci-test/${S3_KEY_PREFIX}llm-provost/logs/error/" downloaded-logs/error/ || true
 
           echo "=== Downloaded Files ==="
           find downloaded-logs -type f -exec ls -lh {} + || true
@@ -595,8 +626,8 @@ jobs:
         run: |
           echo "=== fluent-bit logs ==="
           docker logs fluent-bit 2>&1 || true
-          echo "=== agent-provost logs ==="
-          docker logs agent-provost 2>&1 || true
+          echo "=== llm-provost logs ==="
+          docker logs llm-provost 2>&1 || true
           echo "=== compose ps ==="
           docker compose --env-file .env.versions ps -a || true
       - name: Tear down compose stack
@@ -642,7 +673,7 @@ jobs:
           echo "Changed files:"
           printf '%s\n' "${changed_files}"
 
-          if printf '%s\n' "${changed_files}" | grep -Eq '^(alpaca-mcp\.Dockerfile|hash-pip/requirements-runtime\.txt|\.env\.versions)$'; then
+          if printf '%s\n' "${changed_files}" | grep -Eq '^(mcp-server\.Dockerfile|hash-pip/requirements-runtime\.txt|\.env\.versions)$'; then
             echo "IMAGE_CHANGED=true" >> "$GITHUB_ENV"
             echo "Image-defining files changed; build/push enabled."
           else
@@ -674,10 +705,10 @@ jobs:
         if: env.IMAGE_CHANGED == 'true'
         run: |
           set -euo pipefail
-          docker build -f alpaca-mcp.Dockerfile \
+          docker build -f mcp-server.Dockerfile \
             --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" \
-            -t public.ecr.aws/e2u9m9o7/agent-provost:latest \
-            -t public.ecr.aws/e2u9m9o7/agent-provost:"${IMAGE_SHA_TAG}" .
+            -t public.ecr.aws/e2u9m9o7/llm-provost:latest \
+            -t public.ecr.aws/e2u9m9o7/llm-provost:"${IMAGE_SHA_TAG}" .
       - name: Step 2 (Authenticate to AWS)
         if: env.IMAGE_CHANGED == 'true'
         uses: aws-actions/configure-aws-credentials@v4
@@ -694,13 +725,13 @@ jobs:
         if: env.IMAGE_CHANGED == 'true'
         run: |
           set -euo pipefail
-          docker push public.ecr.aws/e2u9m9o7/agent-provost:latest
-          docker push public.ecr.aws/e2u9m9o7/agent-provost:"${IMAGE_SHA_TAG}"
+          docker push public.ecr.aws/e2u9m9o7/llm-provost:latest
+          docker push public.ecr.aws/e2u9m9o7/llm-provost:"${IMAGE_SHA_TAG}"
       - name: Step 4b (Pin immutable digest in .env.versions)
         if: env.IMAGE_CHANGED == 'true'
         run: |
           set -euo pipefail
-          REPOSITORY_NAME="${ALPACA_IMAGE##*/}"
+          REPOSITORY_NAME="${MCP_IMAGE##*/}"
           ECR_DIGEST=""
           for attempt in $(seq 1 12); do
             ECR_DIGEST="$(aws ecr-public describe-images \
@@ -721,20 +752,20 @@ jobs:
             exit 1
           fi
 
-          sed -i "s|^ALPACA_IMAGE_TAG=.*|ALPACA_IMAGE_TAG=${ECR_DIGEST}|" .env.versions
+          sed -i "s|^MCP_IMAGE_TAG=.*|MCP_IMAGE_TAG=${ECR_DIGEST}|" .env.versions
       - name: Step 4c (Commit pinned digest back to branch)
         if: env.IMAGE_CHANGED == 'true'
         continue-on-error: true
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "ci: pin ALPACA_IMAGE_TAG to ECR digest [skip ci]"
+          commit_message: "ci: pin MCP_IMAGE_TAG to ECR digest [skip ci]"
           file_pattern: .env.versions
       - name: Step 5 (Sanity/Integration Tests)
         if: env.IMAGE_CHANGED == 'true'
         run: |
           set -euo pipefail
-          export ALPACA_API_KEY="dummy"
-          export ALPACA_SECRET_KEY="dummy"
+          export MCP_API_KEY="dummy"
+          export MCP_SECRET_KEY="dummy"
           mkdir -p logs/fluent-bit-storage
            chmod -R a+rwx logs/fluent-bit-storage
           docker compose --env-file .env.versions up -d

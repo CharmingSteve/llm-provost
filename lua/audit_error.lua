@@ -2,7 +2,6 @@ local cjson = require("cjson.safe")
 
 local _M = {}
 
--- Build JSON with guaranteed field order (cjson.encode on a table gives hash order).
 local function ordered_json(fields)
     local parts = {}
     for _, pair in ipairs(fields) do
@@ -19,92 +18,163 @@ local function encode_or_fallback(fields)
     return "{}"
 end
 
-local function resolve_from_ctx_store(ctx_store, request_id)
-    if not ctx_store or not request_id or request_id == "" then
-        return nil, nil
+local function bounded_value(value, encoded_limit)
+    local text = tostring(value or "")
+    local encoded = cjson.encode(text)
+    if encoded and #encoded <= encoded_limit then
+        return text
     end
 
-    local raw = ctx_store:get("req:" .. request_id)
-    if not raw then
-        return nil, nil
+    local suffix = "[truncated]"
+    local low = 0
+    local high = #text
+    local result = suffix
+    while low <= high do
+        local middle = math.floor((low + high) / 2)
+        local candidate = string.sub(text, 1, middle) .. suffix
+        local candidate_encoded = cjson.encode(candidate)
+        if candidate_encoded and #candidate_encoded <= encoded_limit then
+            result = candidate
+            low = middle + 1
+        else
+            high = middle - 1
+        end
+    end
+    return result
+end
+
+local function header(headers, name)
+    return headers[name] or headers[name:lower()]
+end
+
+local function first_nonempty(...)
+    for index = 1, select("#", ...) do
+        local value = select(index, ...)
+        if value ~= nil and tostring(value) ~= "" then
+            return value
+        end
+    end
+    return nil
+end
+
+local function decode_jwt_user(auth_header)
+    if type(auth_header) ~= "string" then
+        return nil
     end
 
-    local decoded = cjson.decode(raw) or {}
-    return decoded.user, decoded.machine
+    local token = auth_header:match("^Bearer%s+(.+)$")
+    local payload = token and token:match("^[^.]+%.([^.]+)%.[^.]+$")
+    if not payload then
+        return nil
+    end
+
+    payload = payload:gsub("-", "+"):gsub("_", "/")
+    local remainder = #payload % 4
+    if remainder > 0 then
+        payload = payload .. string.rep("=", 4 - remainder)
+    end
+
+    local decoded = ngx.decode_base64(payload)
+    local claims = decoded and cjson.decode(decoded)
+    if type(claims) ~= "table" then
+        return nil
+    end
+    return claims.sub or claims.email
 end
 
 function _M.resolve_identity(request_id)
+    local context = ngx.ctx or {}
     local var = ngx.var or {}
-    local ctx_store = ngx.shared and ngx.shared.provost_ctx or nil
-    local req_headers = {}
+    local headers = {}
     if ngx.req and ngx.req.get_headers then
-        req_headers = ngx.req.get_headers() or {}
+        headers = ngx.req.get_headers() or {}
     end
 
-    local header_request_id = req_headers["X-Provost-Request-Id"] or req_headers["x-provost-request-id"]
-    local header_user = req_headers["X-Provost-User"] or req_headers["x-provost-user"]
-    local header_machine = req_headers["X-Provost-Machine"] or req_headers["x-provost-machine"]
+    local resolved_request_id = first_nonempty(
+        request_id,
+        context.request_id,
+        var.provost_req_id,
+        var.request_id
+    ) or ""
+    local is_mcp_path = context.is_mcp_path or (var.uri or ""):match("^/mcp/") ~= nil
+    local user_id = context.user_id
+    if not user_id or user_id == "" then
+        if is_mcp_path then
+            user_id = header(headers, "X-Cognito-User")
+        else
+            user_id = decode_jwt_user(header(headers, "Authorization"))
+        end
+    end
+    user_id = first_nonempty(user_id, var.provost_user_id, "steve")
 
-    local resolved_request_id = request_id
-        or var.provost_req_id
-        or header_request_id
-        or var.http_x_provost_request_id
-        or (ctx_store and ctx_store:get("last:request_id"))
-        or var.request_id
-        or ""
+    local body = var.req_body or ""
+    local parsed = is_mcp_path and cjson.decode(body) or nil
+    local arguments = type(parsed) == "table"
+        and type(parsed.params) == "table"
+        and type(parsed.params.arguments) == "table"
+        and parsed.params.arguments
+        or nil
+    local body_customer_id = arguments
+        and first_nonempty(arguments.customer_id, arguments.customer_name)
+        or nil
+    local customer_id = first_nonempty(
+        context.customer_id,
+        body_customer_id,
+        var.provost_customer_id,
+        "craig"
+    )
 
-    local user = header_user or var.http_x_provost_user
-    local machine = header_machine or var.http_x_provost_machine
+    local conversation_id = first_nonempty(
+        context.conversation_id,
+        header(headers, "X-Conversation-Id"),
+        var.provost_conversation_id,
+        "none"
+    )
 
-    if (not user or user == "") or (not machine or machine == "") then
-        local ctx_user, ctx_machine = resolve_from_ctx_store(ctx_store, resolved_request_id)
-        user = (user and user ~= "") and user or ctx_user
-        machine = (machine and machine ~= "") and machine or ctx_machine
+    if is_mcp_path and arguments and not context.tool_name then
+        context.tool_name = parsed.params.name
     end
 
-    if not user or user == "" then
-        user = (ctx_store and ctx_store:get("last:user")) or ""
-    end
-    if not machine or machine == "" then
-        machine = (ctx_store and ctx_store:get("last:machine")) or ""
-    end
-
-    if resolved_request_id and resolved_request_id ~= "" then
+    if ngx.var then
         ngx.var.provost_req_id = resolved_request_id
+        ngx.var.provost_user_id = tostring(user_id)
+        ngx.var.provost_customer_id = tostring(customer_id)
+        ngx.var.provost_conversation_id = tostring(conversation_id)
     end
 
-    return resolved_request_id or "", user or "", machine or ""
+    return resolved_request_id, tostring(user_id), tostring(customer_id), tostring(conversation_id)
 end
 
 function _M.emit(tag, status_code, error_code, error_detail, opts)
     opts = opts or {}
+    local request_id, user_id, customer_id, conversation_id =
+        _M.resolve_identity(opts.request_id)
 
-    local request_id, user, machine = _M.resolve_identity(opts.request_id)
-
-    -- Fields ordered to match access log cosmetic order (time_local first).
     local fields = {
-        {"time_local",          ngx.var.time_local or ""},
-        {"remote_addr",         ngx.var.remote_addr or ""},
-        {"request",             ngx.var.request or ""},
-        {"status",              tostring(status_code or ngx.status or "")},
-        {"provost_request_id",  request_id},
-        {"provost_user",        user},
-        {"provost_machine",     machine},
-        {"request_body",        opts.request_body or ngx.var.req_body or ""},
-        {"resp_body",           opts.resp_body or ngx.var.resp_body or ""},
-        {"error_code",          error_code or "PROVOST_ERROR"},
-        {"error_detail",        error_detail or ""},
-        {"stream_tag",          tag},
-        {"log_type",            "error"},
-        {"date",                ngx.utctime()},
+        {"time_local", bounded_value(ngx.var.time_local, 64)},
+        {"remote_addr", bounded_value(ngx.var.remote_addr, 64)},
+        {"request", bounded_value(ngx.var.request, 256)},
+        {"status", bounded_value(status_code or ngx.status, 16)},
+        {"request_id", bounded_value(request_id, 96)},
+        {"user_id", bounded_value(user_id, 96)},
+        {"customer_id", bounded_value(customer_id, 96)},
+        {"conversation_id", bounded_value(conversation_id, 96)},
+        {"request_body", bounded_value(opts.request_body or ngx.var.req_body, 512)},
+        {"resp_body", bounded_value(opts.resp_body or ngx.var.resp_body, 512)},
+        {"error_code", bounded_value(error_code or "PROVOST_ERROR", 96)},
+        {"error_detail", bounded_value(error_detail, 256)},
+        {"stream_tag", bounded_value(tag, 96)},
+        {"log_type", "error"},
+        {"date", bounded_value(ngx.utctime(), 64)},
     }
 
-    local encoded = encode_or_fallback(fields)
-    local audit_line = "PROVOST_AUDIT_ERROR " .. encoded
+    if ngx.ctx and ngx.ctx.is_mcp_path then
+        table.insert(fields, 9, {"tool_name", bounded_value(ngx.ctx.tool_name, 96)})
+        table.insert(fields, 10, {"destination", bounded_value(ngx.ctx.mcp_destination, 256)})
+    end
 
-    -- Route audit errors through nginx error_log (syslog unix socket) for
-    -- deterministic local delivery into the Fluent Bit syslog input.
-    ngx.log(ngx.ERR, audit_line)
+    local encoded = encode_or_fallback(fields)
+    ngx.log(ngx.ERR, "PROVOST_AUDIT_ERROR " .. encoded)
 end
 
 return _M

@@ -1,20 +1,15 @@
 services:
-  alpaca-mcp:
-    # Alpaca image is built with docker build and pushed to ECR. Digest is sourced from .env.versions via: docker compose --env-file .env.versions. It is built from the alpace-mcp.Dockerfile in the root of this repo.
-    image: ${ALPACA_IMAGE}@${ALPACA_IMAGE_TAG}
+  mcp-server:
+    # LLM Provost MCP image is built with docker build and pushed to ECR. Digest is sourced from .env.versions via: docker compose --env-file .env.versions. It is built from the mcp-server.Dockerfile in the root of this repo.
+    image: ${MCP_IMAGE}@${MCP_IMAGE_TAG}
     pull_policy: if_not_present
-    container_name: alpaca-mcp
+    container_name: mcp-server
     volumes:
       - ./entrypoint.sh:/entrypoint.sh:ro
       - ${PROVOST_SECRETS_DIR:-./.secrets}:/run/secrets:ro
       - /etc/localtime:/etc/localtime:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     environment:
-      TRADE_API_URL: "http://agent-provost:8081/trading"
-      DATA_API_URL: "http://agent-provost:8081/data"
-      BROKER_API_URL: "http://agent-provost:8081/broker"
-      ALPACA_API_KEY: ${ALPACA_API_KEY:-}
-      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
       TZ: ${TZ:-Asia/Jerusalem}
     expose:
       - "8088"
@@ -45,7 +40,7 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
-      S3_BUCKET: ${S3_BUCKET:-agent-provost-local}
+      S3_BUCKET: ${S3_BUCKET:-llm-provost-local}
       S3_KEY_PREFIX: ${S3_KEY_PREFIX:-}
       INSTANCE_ID: ${INSTANCE_ID:-local-dev}
       TZ: ${TZ:-Asia/Jerusalem}
@@ -68,28 +63,34 @@ services:
       - /tmp
     pids_limit: 256
     restart: unless-stopped
-  agent-provost:
-    # Agent Provost image  is the public Openresty image with a custom entrypoint script that runs the rules. Digest is sourced from .env.versions via: docker compose --env-file .env.versions. It is  Digest is sourced from .env.versions via: docker compose --env-file .env.versions 
+    
+  llm-provost:
+    build: .
     image: ${OPENRESTY_IMAGE}
     pull_policy: if_not_present
-    container_name: agent-provost
+    container_name: llm-provost
+    working_dir: /app
     depends_on:
-      alpaca-mcp:
+      mcp-server:
         condition: service_started
       fluent-bit:
         condition: service_healthy
     ports:
-      - "8088:8000"
+      - "8000:8000"
     expose:
       - "8081"
     volumes:
-      - ./default.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - ./.env:/app/.env:ro
+      - ./default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./lua:/etc/nginx/lua:ro
-      - ./rules.json:/etc/rules.json:ro
+      - ./rules.json:/etc/nginx/rules.json:ro
+      - ./mcp_routes.json:/etc/nginx/mcp_routes/mcp_routes.json:ro
       - ${PROVOST_SECRETS_DIR:-./.secrets}:/run/secrets:ro
       - provost_run:/var/run/provost
       - /etc/localtime:/etc/localtime:ro
     environment:
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      MCP_ROUTING_TABLE_PATH: /etc/nginx/mcp_routes/mcp_routes.json
       TZ: ${TZ:-Asia/Jerusalem}
     networks:
       - mcp_internal
@@ -105,10 +106,86 @@ services:
     pids_limit: 256
     restart: unless-stopped
 
+  mongodb:
+    image: mongo:8.0.20
+    container_name: provost-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - app_net
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.35.1
+    container_name: provost-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_HOST: http://0.0.0.0:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-provost-dev-meili-key}
+    volumes:
+      - meili_data:/meili_data
+    networks:
+      - app_net
+    security_opt:
+      - no-new-privileges:true
+  
+
+  api:
+    image: ghcr.io/danny-avila/librechat-dev:latest
+    container_name: provost-librechat
+    restart: unless-stopped
+    ports:
+      - "3080:3080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      meilisearch:
+        condition: service_started
+    environment:
+      # Static config (never changes)
+      PORT: "3080"
+      HOST: "0.0.0.0"
+      #PROXY: "http://llm-provost:8000"
+      MONGO_URI: "mongodb://mongodb:27017/LibreChat"
+      SEARCH: "true"
+      MEILI_HOST: "http://meilisearch:7700"
+      MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-provost-dev-meili-key}"
+      ENDPOINTS: "openAI"
+      OPENID_CLIENT_ID: "${OPENID_CLIENT_ID:-}"
+      OPENID_CLIENT_SECRET: "${OPENID_CLIENT_SECRET:-}"
+      OPENID_ISSUER: "${OPENID_ISSUER:-}"
+      OPENID_CALLBACK_URL: "${OPENID_CALLBACK_URL:-/oauth/openid/callback}"
+      OPENID_SESSION_SECRET: "${OPENID_SESSION_SECRET:-change-this-to-a-random-string}"
+      OPENID_SCOPE: "openid profile email"
+      #OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_REVERSE_PROXY: "${OPENAI_REVERSE_PROXY:-}"
+      MCP_ALLOWED_DOMAINS: "http://llm-provost:8000"
+    volumes:
+      - ./config/librechat.yaml:/app/librechat.yaml:ro
+      - librechat_images:/app/client/public/images
+      - librechat_uploads:/app/uploads
+      - ./.env:/app/.env:ro
+    networks:
+      - app_net
+      - proxy_egress
+    security_opt:
+      - no-new-privileges:true
+
 networks:
   mcp_internal:
     internal: true
   proxy_egress:
+  app_net:
+    driver: bridge
 
 volumes:
   provost_run:
@@ -117,3 +194,7 @@ volumes:
       type: tmpfs
       device: tmpfs
       o: uid=0,gid=0,mode=0777
+  mongodb_data:
+  meili_data:
+  librechat_images:
+  librechat_uploads:

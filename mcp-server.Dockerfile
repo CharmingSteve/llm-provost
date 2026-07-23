@@ -6,13 +6,13 @@ ARG BASE_PYTHON_IMAGE=python:3.11-alpine@sha256:5f2c7aad5aa1aa37c8e023c8bdd40aab
 FROM ${BASE_PYTHON_IMAGE}
 
 COPY hash-pip/requirements-runtime.txt /tmp/requirements-runtime.txt
-# the Alpaca Mcp Server is installed with pip, its page is https://pypi.org/project/alpaca-mcp-server/ and https://github.com/alpacahq/alpaca-mcp-server
 RUN apk upgrade --no-cache \
 	&& pip install --no-cache-dir --require-hashes --no-deps -r /tmp/requirements-runtime.txt \
-	&& pip install --no-cache-dir "alpaca-mcp-server==2.1.0" \
 	&& rm -f /tmp/requirements-runtime.txt \
 	&& adduser -D -u 10001 -s /bin/sh appuser \
 	&& chown -R appuser:appuser /usr/local/lib/python3.11/site-packages
+
+COPY mcp_server/ /app/mcp_server/
 
 USER appuser
 

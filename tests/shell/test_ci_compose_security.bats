@@ -10,10 +10,10 @@
   [ "$status" -eq 0 ]
 }
 
-@test "alpaca-mcp.Dockerfile uses ARG BASE_PYTHON_IMAGE" {
-  run grep -E '^ARG BASE_PYTHON_IMAGE=python:3\.11-alpine@sha256:[a-f0-9]{64}$' alpaca-mcp.Dockerfile
+@test "mcp-server.Dockerfile uses ARG BASE_PYTHON_IMAGE" {
+  run grep -E '^ARG BASE_PYTHON_IMAGE=python:3\.11-alpine@sha256:[a-f0-9]{64}$' mcp-server.Dockerfile
   [ "$status" -eq 0 ]
-  run grep -E '^FROM \$\{BASE_PYTHON_IMAGE\}$' alpaca-mcp.Dockerfile
+  run grep -E '^FROM \$\{BASE_PYTHON_IMAGE\}$' mcp-server.Dockerfile
   [ "$status" -eq 0 ]
 }
 
@@ -46,7 +46,7 @@
   [ "$status" -eq 0 ]
   run grep -E '^\s*AWS_SESSION_TOKEN:\s*\$\{AWS_SESSION_TOKEN:-\}$' docker-compose.yml
   [ "$status" -eq 0 ]
-  run grep -E '^\s*S3_BUCKET:\s*\$\{S3_BUCKET:-agent-provost-local\}$' docker-compose.yml
+  run grep -E '^\s*S3_BUCKET:\s*\$\{S3_BUCKET:-llm-provost-local\}$' docker-compose.yml
   [ "$status" -eq 0 ]
 }
 
@@ -140,12 +140,12 @@
   [ "$status" -eq 0 ]
 }
 
-@test "CI scans built alpaca-mcp image" {
+@test "CI scans built mcp-server image" {
   run grep -E 'TRIVY_BUILD_TAG=\$\(git rev-parse --short=7 HEAD\)' .github/workflows/ci.yml
   [ "$status" -eq 0 ]
-  run grep -E 'docker image inspect "agent-provost-alpaca-mcp:\$\{TRIVY_BUILD_TAG\}" >/dev/null' .github/workflows/ci.yml
+  run grep -E 'docker image inspect "llm-provost-mcp-server:\$\{TRIVY_BUILD_TAG\}" >/dev/null' .github/workflows/ci.yml
   [ "$status" -eq 0 ]
-  run grep -E 'trivy image --exit-code 1 --severity CRITICAL,HIGH "agent-provost-alpaca-mcp:\$\{TRIVY_BUILD_TAG\}"' .github/workflows/ci.yml
+  run grep -E 'trivy image --exit-code 1 --severity CRITICAL,HIGH "llm-provost-mcp-server:\$\{TRIVY_BUILD_TAG\}"' .github/workflows/ci.yml
   [ "$status" -eq 0 ]
 }
 
@@ -161,9 +161,9 @@
   [ "$status" -eq 0 ]
   run grep -E 'has HIGH/CRITICAL CVEs: \$\{TRIVY_OPENRESTY_CVES:-unavailable\}' .github/workflows/ci.yml
   [ "$status" -eq 0 ]
-  run grep -E 'TRIVY_ALPACA_MCP_CVES=' .github/workflows/ci.yml
+  run grep -E 'TRIVY_MCP_SERVER_CVES=' .github/workflows/ci.yml
   [ "$status" -eq 0 ]
-  run grep -E 'has HIGH/CRITICAL CVEs: \$\{TRIVY_ALPACA_MCP_CVES:-unavailable\}' .github/workflows/ci.yml
+  run grep -E 'has HIGH/CRITICAL CVEs: \$\{TRIVY_MCP_SERVER_CVES:-unavailable\}' .github/workflows/ci.yml
   [ "$status" -eq 0 ]
 }
 
@@ -208,27 +208,27 @@
   [ "$hash_count" -ge "$pkg_count" ]
 }
 
-@test "alpaca-mcp.Dockerfile uses --require-hashes for pip install" {
-  run grep -E '\-\-require-hashes' alpaca-mcp.Dockerfile
+@test "mcp-server.Dockerfile uses --require-hashes for pip install" {
+  run grep -E '\-\-require-hashes' mcp-server.Dockerfile
   [ "$status" -eq 0 ]
 }
 
-@test ".env.versions defines ALPACA_IMAGE" {
-  run grep -E '^ALPACA_IMAGE=public\.ecr\.aws/e2u9m9o7/agent-provost$' .env.versions
+@test ".env.versions defines MCP_IMAGE" {
+  run grep -E '^MCP_IMAGE=public\.ecr\.aws/e2u9m9o7/llm-provost$' .env.versions
   [ "$status" -eq 0 ]
 }
 
-@test "docker-compose.yml uses ALPACA_IMAGE for alpaca-mcp" {
-  run grep -E 'image:\s*\$\{ALPACA_IMAGE\}@\$\{ALPACA_IMAGE_TAG\}' docker-compose.yml
+@test "docker-compose.yml uses MCP_IMAGE for mcp-server" {
+  run grep -E 'image:\s*\$\{MCP_IMAGE\}@\$\{MCP_IMAGE_TAG\}' docker-compose.yml
   [ "$status" -eq 0 ]
 }
 
-@test ".env.versions pins ALPACA_IMAGE_TAG by digest" {
-  run grep -E '^ALPACA_IMAGE_TAG=sha256:[a-f0-9]{64}$' .env.versions
+@test ".env.versions pins MCP_IMAGE_TAG by digest" {
+  run grep -E '^MCP_IMAGE_TAG=sha256:[a-f0-9]{64}$' .env.versions
   [ "$status" -eq 0 ]
 }
 
-@test "docker-compose.yml has pull_policy if-not-present for alpaca-mcp" {
+@test "docker-compose.yml has pull_policy if-not-present for mcp-server" {
   run grep -B 2 'pull_policy: if_not_present' docker-compose.yml
   [ "$status" -eq 0 ]
   # Verify it appears at least 3 times (once for each service)

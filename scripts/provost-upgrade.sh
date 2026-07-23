@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-git config --global --add safe.directory /opt/agent-provost
+git config --global --add safe.directory /opt/llm-provost
 
 # Ensure we are in the repo root
 if [ ! -f "bootstrap.sh" ]; then
@@ -26,16 +26,16 @@ if [ -f .env.versions ]; then
     # shellcheck disable=SC2046
     export $(grep -v '^#' .env.versions | xargs)
     
-    for img_var in OPENRESTY_IMAGE BASE_PYTHON_IMAGE ALPACA_IMAGE FLUENT_BIT_IMAGE; do
+    for img_var in OPENRESTY_IMAGE BASE_PYTHON_IMAGE MCP_IMAGE FLUENT_BIT_IMAGE; do
         img_val="${!img_var:-}"
         
-        # Special handling for ALPACA_IMAGE which uses a separate TAG variable
-        if [ "$img_var" = "ALPACA_IMAGE" ] && [ -n "${ALPACA_IMAGE_TAG:-}" ]; then
+        # Special handling for MCP_IMAGE which uses a separate TAG variable
+        if [ "$img_var" = "MCP_IMAGE" ] && [ -n "${MCP_IMAGE_TAG:-}" ]; then
             # Check if the tag is a digest (starts with sha256:) or a regular tag
-            if [[ "$ALPACA_IMAGE_TAG" == sha256:* ]]; then
-                img_val="${img_val}@${ALPACA_IMAGE_TAG}"
+            if [[ "$MCP_IMAGE_TAG" == sha256:* ]]; then
+                img_val="${img_val}@${MCP_IMAGE_TAG}"
             else
-                img_val="${img_val}:${ALPACA_IMAGE_TAG}"
+                img_val="${img_val}:${MCP_IMAGE_TAG}"
             fi
         fi
 
@@ -74,7 +74,7 @@ git pull origin "$BRANCH_NAME"
 
 echo "[upgrade] Re-staging bootstrap runtime/secrets"
 # Auto-detect environment
-if [[ -d /opt/agent-provost ]]; then
+if [[ -d /opt/llm-provost ]]; then
     BOOTSTRAP_MODE="ec2"
 else
     BOOTSTRAP_MODE="dev"
@@ -90,13 +90,13 @@ echo "[upgrade] Pulling pinned images"
 
 echo "[upgrade] Loading secrets from /run/secrets"
 if [ -d "/run/secrets" ]; then
-    if [ -f "/run/secrets/alpaca_api_key" ]; then
-        ALPACA_API_KEY=$(cat /run/secrets/alpaca_api_key)
-        export ALPACA_API_KEY
+    if [ -f "/run/secrets/mcp_api_key" ]; then
+        MCP_API_KEY=$(cat /run/secrets/mcp_api_key)
+        export MCP_API_KEY
     fi
-    if [ -f "/run/secrets/alpaca_secret_key" ]; then
-        ALPACA_SECRET_KEY=$(cat /run/secrets/alpaca_secret_key)
-        export ALPACA_SECRET_KEY
+    if [ -f "/run/secrets/mcp_secret_key" ]; then
+        MCP_SECRET_KEY=$(cat /run/secrets/mcp_secret_key)
+        export MCP_SECRET_KEY
     fi
     if [ -f "/run/secrets/s3_bucket" ]; then
         S3_BUCKET=$(cat /run/secrets/s3_bucket)

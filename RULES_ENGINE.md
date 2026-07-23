@@ -1,325 +1,174 @@
-# Agent Provost — Dynamic Rules Engine
+# LLM Provost — Dynamic Governance Rules Engine
 
-This document describes the hot-reloadable, JSON-driven risk rule system added to Agent Provost.  It is aimed at **SRE / DevOps** engineers who operate the proxy and at **developers** who extend it with new rules.
+This document describes the hot-reloadable, JSON-driven governance policy system used by LLM Provost.
 
 ---
 
 ## Overview
 
-The circuit-breaker logic has been extracted from `default.conf` into two Lua modules and an external JSON configuration file:
+The enforcement path is split across:
 
 | Component | Path | Purpose |
 |---|---|---|
-| Rules config | `rules.json` | Declare, enable/disable, and tune rules |
-| Rule engine | `lua/rules_engine.lua` | Pure evaluation function (no I/O) |
-| Rule loader | `lua/rule_loader.lua` | Background timer that hot-reloads `rules.json` |
-| Shared dict | `lua_shared_dict rules 1m` | In-memory store shared across all workers |
+| Rules config | `rules.json` | Declarative governance policy |
+| Rule engine | `lua/rules_engine.lua` | Request evaluation logic |
+| Rule loader | `lua/rule_loader.lua` | Background reload of `rules.json` |
+| Shared dict | `lua_shared_dict rules 1m` | Cross-worker in-memory policy cache |
+
+The reload mechanism is unchanged from the prior implementation: `rules.json` is polled every 10 seconds using file `mtime`, validated before load, and retained in shared memory so request handling avoids per-request disk I/O.
 
 ---
 
-## Architecture
+## Rules Schema
 
+Phase 1 replaces the trading-focused schema with governance-focused top-level objects.
+
+### `tool_allowlist`
+
+If present, only the listed tools are permitted.
+
+```json
+"tool_allowlist": {
+  "enabled": true,
+  "description": "Allow only approved read-oriented MCP tools.",
+  "params": {
+    "tools": [
+      "get_records",
+      "list_items",
+      "summarize_report",
+      "export_summary"
+    ]
+  }
+}
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  OpenResty worker                                                │
-│                                                                  │
-│  init_worker_by_lua_block                                        │
-│    └─► rule_loader.lua ──── reads rules.json ──► lua_shared_dict │
-│              │                                          ▲        │
-│              └─► ngx.timer.at(10, reload_rules) ───────┘        │
-│                                                                  │
-│  access_by_lua_block (per request, zero disk I/O)                │
-│    └─► rules_engine.check_request(parsed, rules)                 │
-│          ▲                                                       │
-│          └─── ngx.shared.rules:get("rules") ◄── lua_shared_dict │
-└──────────────────────────────────────────────────────────────────┘
+
+### `tool_blocklist`
+
+Blocked tools are denied even if they also appear in an allowlist.
+
+```json
+"tool_blocklist": {
+  "enabled": true,
+  "description": "Block destructive or bulk-export operations.",
+  "params": {
+    "tools": [
+      "delete_record",
+      "export_full_database"
+    ]
+  }
+}
 ```
 
-### Key properties
+### `rate_limits`
 
-- **No per-request disk I/O.** Every access to the rule set goes through `ngx.shared.rules` (pure memory lookup).
-- **Hot reload without nginx reload or HUP.** The background timer polls `rules.json` every 10 seconds; when the file's `mtime` changes, the new JSON is parsed and atomically written to the shared dict.
-- **Safe against partial writes.** The loader validates JSON with `cjson.decode` before touching the shared dict. A malformed file leaves the previous rule set intact and logs an `[ERR]` line.
-- **Multi-worker safe.** Each worker independently maintains a local `last_mtime` variable and writes to the shared dict. Because all workers write the same validated content, there is no race condition.
+Per-tool rate limits let operators throttle expensive or sensitive tools.
 
----
-
-## `rules.json` Structure
-
-Each top-level key names a rule. Every rule object **must** contain:
-
-```jsonc
-{
-  "<rule_name>": {
-    "enabled": true,          // boolean: true = enforce, false = skip
-    "description": "...",     // human-readable note (optional but recommended)
-    "params": {               // rule-specific configuration
-      // ...
+```json
+"rate_limits": {
+  "enabled": true,
+  "description": "Apply per-tool rate windows.",
+  "params": {
+    "rules": {
+      "get_records": {
+        "max_calls": 10,
+        "window_seconds": 60
+      },
+      "summarize_report": {
+        "max_calls": 20,
+        "window_seconds": 300
+      }
     }
   }
 }
 ```
 
-### Bundled rules
+### `token_caps`
 
-#### `max_trade_size`
-
-Blocks requests whose share quantity exceeds `params.limit`.
-
-Accepted quantity fields:
-
-- `quantity`
-- `qty`
-- `order_quantity`
-
-Also evaluates notional orders (`notional`) to prevent quantity-limit bypass.
-
-- If `limit_price` is present and valid, estimated shares are calculated as `notional / limit_price`.
-- If `limit_price` is missing or invalid for a notional order, the request is blocked (fail-safe).
+Token budgets can cap runaway prompt or completion sizes.
 
 ```json
-"max_trade_size": {
+"token_caps": {
   "enabled": true,
-  "description": "Block trades whose quantity exceeds the maximum allowed limit.",
+  "description": "Limit token-heavy requests.",
   "params": {
-    "limit": 100
+    "max_tokens": 4096,
+    "max_prompt_tokens": 8192
   }
 }
 ```
 
-| Param | Type | Default | Description |
-|---|---|---|---|
-| `limit` | number | 100 | Maximum allowed trade quantity (inclusive boundary: `qty > limit` blocks) |
+### `time_based_rules`
 
-#### `max_trade_notional`
-
-Blocks requests whose estimated dollar value exceeds `params.limit`.
-
-Evaluation order:
-
-- If `notional` is provided and positive, that value is used.
-- Otherwise, when both quantity and `limit_price` are present and valid, estimated value is `qty * limit_price`.
-- Notional orders without valid `limit_price` are blocked (fail-safe).
+Restrict tool use to approved windows.
 
 ```json
-"max_trade_notional": {
+"time_based_rules": {
   "enabled": true,
-  "description": "Block trades whose dollar notional value exceeds the configured limit.",
+  "description": "Restrict selected tools to staffed business hours.",
   "params": {
-    "limit": 50000
+    "rules": [
+      {
+        "tool": "export_summary",
+        "allowed_hours": "09:00-17:00",
+        "timezone": "America/New_York"
+      }
+    ]
   }
 }
 ```
 
-| Param | Type | Default | Description |
-|---|---|---|---|
-| `limit` | number | 50000 | Maximum allowed per-order notional value |
+### `logging_rules`
 
-#### `cumulative_trade_notional`
-
-Blocks requests when rolling cumulative exposure for a `(user, machine, symbol)` key would exceed `params.limit` within `params.window_seconds`.
-
-This rule uses the `provost_ctx` shared dictionary to maintain per-identity rolling state. If risk state cannot be updated safely, requests are blocked to avoid untracked exposure.
+These settings define audit expectations for every request.
 
 ```json
-"cumulative_trade_notional": {
+"logging_rules": {
   "enabled": true,
-  "description": "Block cumulative dollar exposure across multiple orders within a short rolling window.",
+  "description": "Require identity-rich audit logging.",
   "params": {
-    "limit": 50000,
-    "window_seconds": 300
-  }
-}
-```
-
-| Param | Type | Default | Description |
-|---|---|---|---|
-| `limit` | number | 50000 | Maximum cumulative notional within the active window |
-| `window_seconds` | number | 300 | Rolling window length in seconds |
-
-#### `symbol_order_cooldown`
-
-Blocks repeat orders for the same symbol within a rolling cooldown window for a `(user, machine, symbol)` key.
-
-```json
-"symbol_order_cooldown": {
-  "enabled": true,
-  "description": "Block repeat orders for the same symbol within a rolling time window.",
-  "params": {
-    "window_seconds": 300
-  }
-}
-```
-
-| Param | Type | Default | Description |
-|---|---|---|---|
-| `window_seconds` | number | 300 | Cooldown duration for repeat orders on the same symbol |
-
-#### `blocked_tickers`
-
-Blocks any request whose `ticker` or equivalent symbol field matches a symbol in `params.tickers`.
-
-```json
-"blocked_tickers": {
-  "enabled": true,
-  "description": "Block trades on restricted ticker symbols.",
-  "params": {
-    "tickers": ["GME", "AMC", "BBBY"]
-  }
-}
-```
-| Param | Type | Description |
-|---|---|---|
-| `tickers` | string[] | List of exact ticker symbols to reject |
-
-#### `restricted_ticker_tool_rules`
-
-Blocks requests that use a specific trade tool and a restricted ticker symbol, even when the symbol is provided via different field names.
-
-```json
-"restricted_ticker_tool_rules": {
-  "enabled": true,
-  "description": "Block restricted symbols when they are used by specific trade tools, regardless of argument field naming.",
-  "params": {
-    "tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
-    "tickers": ["GME", "AMC", "BBBY"]
-  }
-}
-```
-
-| Param | Type | Description |
-|---|---|---|
-| `tools` | string[] | Tool names whose requests should be checked against restricted symbols |
-| `tickers` | string[] | Restricted ticker symbol list |
-
-#### `trading_window`
-
-*(Disabled by default)* Placeholder for a time-of-day restriction. When enabled, only requests that arrive between `start_hour` and `end_hour` (UTC, 24-hour) are allowed.
-
-```json
-"trading_window": {
-  "enabled": false,
-  "description": "Restrict automated trading to allowed UTC hours.",
-  "params": {
-    "start_hour": 13,
-    "end_hour": 21
+    "always_log_user_id": true,
+    "always_log_customer_id": true,
+    "always_log_tool_name": true,
+    "redact_prompt_content": false
   }
 }
 ```
 
 ---
 
-## Hot-Reload Mechanism
+## Complete Example
 
-1. `init_worker_by_lua_block` in `default.conf` calls `require("rule_loader")` once per worker at startup.
-2. `rule_loader.lua` immediately reads and validates `rules.json`, writing the result to `ngx.shared.rules`.
-3. A recurring `ngx.timer.at(10, reload_rules)` callback wakes every 10 seconds, compares the file's `mtime` to the last-seen value, and reloads only when the file has changed.
-4. If parsing fails (invalid JSON, empty file, array instead of object), the existing rules remain active and an error is written to the nginx error log.
+The shipped `rules.json` includes all six required top-level fields with a generic governance example.
 
-### Demonstrating a live rule change (no restart)
+1. Tool allowlist for approved read-oriented tools.
+2. Tool blocklist for destructive operations.
+3. Per-tool rate limits.
+4. Token budgets.
+5. Time-window restrictions.
+6. Logging requirements.
+
+---
+
+## Hot Reload
+
+1. `init_worker_by_lua_block` loads `rule_loader.lua` once per worker.
+2. `rule_loader.lua` reads and validates `rules.json`.
+3. A repeating 10-second timer checks for file `mtime` changes.
+4. Valid updates replace the shared rules atomically.
+5. Invalid updates are rejected and the previous rule set remains active.
+
+### Live Update Example
 
 ```bash
-# Start the stack
-docker compose --env-file .env.versions up -d
-
-# Check that a large trade is blocked
-curl -s -X POST http://localhost:8088/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"params":{"arguments":{"quantity":500}}}' | jq .
-# → {"error":"PROVOST_INTERVENTION: Risk Limit Exceeded..."}
-
-# Lower the limit to 10 by editing rules.json on the host
-perl -0777 -i -pe 's/"limit": 100/"limit": 10/' rules.json
-
-# Wait up to 10 seconds for the reload timer to fire, then retry
-sleep 12
-curl -s -X POST http://localhost:8088/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"params":{"arguments":{"quantity":50}}}' | jq .
-# → {"error":"PROVOST_INTERVENTION: Risk Limit Exceeded..."}
-# A trade of 50 is now blocked because the limit is 10.
-
-# Restore
-perl -0777 -i -pe 's/"limit": 10/"limit": 100/' rules.json
+perl -0777 -i -pe 's/"max_tokens": 4096/"max_tokens": 2048/' rules.json
 ```
 
----
-
-## Adding a New Rule
-
-1. **Edit `rules.json`** — add a new key:
-
-   ```json
-   "max_daily_trades": {
-     "enabled": true,
-     "description": "Block if the daily trade count exceeds a cap.",
-     "params": {
-       "max_count": 20
-     }
-   }
-   ```
-
-2. **Extend `lua/rules_engine.lua`** — add a new block inside `check_request`:
-
-   ```lua
-   local daily_rule = rules.max_daily_trades
-   if type(daily_rule) == "table" and daily_rule.enabled == true then
-       -- ... implement your logic using args / ngx.shared etc.
-   end
-   ```
-
-3. **Add unit tests** in `tests/lua/rules_engine_spec.lua` following the existing pattern.
-
-4. **Save `rules.json`** — OpenResty picks up the change within 10 seconds; no reload required.
+Within 10 seconds, requests will be evaluated against the new token cap.
 
 ---
 
-## Volume Mounts
+## Operational Notes
 
-`docker-compose.yml` mounts the following **read-only** paths into the `agent-provost` container:
-
-| Host path | Container path | Description |
-|---|---|---|
-| `./default.conf` | `/usr/local/openresty/nginx/conf/nginx.conf` | Main nginx config |
-| `./lua/` | `/etc/nginx/lua/` | Lua modules directory |
-| `./rules.json` | `/etc/rules.json` | Live rule configuration |
-
-To update rules in a running container, edit `rules.json` on the host.  The bind-mount means the container sees the change immediately; the reload timer will pick it up within its polling interval.
-
----
-
-## Error Handling
-
-| Failure | Behaviour |
-|---|---|
-| `rules.json` missing at startup | Error logged; shared dict left empty (all rules skip = fail-open) |
-| `rules.json` unreadable | Error logged; previous rules remain active |
-| Invalid JSON | Error logged; previous rules remain active |
-| JSON array instead of object | Error logged; previous rules remain active |
-| Shared dict full | Error logged; write fails but previous rules remain active |
-| Timer scheduling failure | Error logged; no further reloads (restart required) |
-
-All errors appear in the nginx error log at `ERR` level:
-
-```
-[rule_loader] JSON parse error in '/etc/rules.json': ...
-[rule_loader] rules reloaded from /etc/rules.json
-```
-
----
-
-## Performance Notes
-
-- `ngx.shared.rules:get("rules")` is an O(1) memory lookup using the built-in OpenResty LRU shared dict.
-- `cjson.decode` is called once per request to deserialise the cached JSON string into a Lua table.  For very high throughput, consider caching the decoded table in `ngx.ctx` or using a worker-local variable protected by a version counter — but this is rarely necessary in practice.
-- The background timer uses one Lua coroutine per worker and does not block the event loop.
-
----
-
-## Operational Checklist
-
-- [ ] Confirm `rules.json` is mounted read-only (`:ro`) into the container.
-- [ ] Verify the initial load succeeds: `docker logs agent-provost | grep rule_loader`.
-- [ ] Validate your edited `rules.json` with `python3 -m json.tool rules.json` before deploying.
-- [ ] Monitor Fluent Bit stream output (or recent S3 objects under `agent-provost/logs/`) for `[rule_loader]` entries after any rule change.
-- [ ] If reload is urgent, you can force an immediate reload by touching the file (`touch rules.json`) to bump its mtime without changing its content.
+- Keep `PROVOST_TOKEN` unchanged during Phase 1.
+- The governance schema in this document must match `rules.json` exactly.
+- If you add fields later, document them here before relying on them operationally.

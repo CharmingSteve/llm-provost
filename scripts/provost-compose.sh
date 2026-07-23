@@ -1,36 +1,66 @@
-#!/bin/bash
+#!/bin/sh
+set -eu
 
-set -euo pipefail
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+PROJECT_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
+COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
+VERSIONS_FILE="$PROJECT_ROOT/.env.versions"
 
-# Prefer the EC2 install path, but fall back to the repo root for local dev.
-if [[ -d /opt/agent-provost ]]; then
-    PROJECT_ROOT=/opt/agent-provost
-else
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+usage() {
+	echo "Usage: $0 [--no-deps] {up|down|restart|logs|build|pull} [service ...]" >&2
+	exit 2
+}
+
+if [ ! -f "$PROJECT_ROOT/.env" ]; then
+	echo "WARN: $PROJECT_ROOT/.env is missing; secret-backed services may not start" >&2
 fi
 
-cd "$PROJECT_ROOT"
-
-# Load .env.versions (digests) always.
-# Load .env (local dev creds) if it exists, don't error if missing (for CI/prod).
-# Source .env into shell environment so credentials are available to export.
-if [[ -f .env ]]; then
-	set -a
-	# shellcheck disable=SC1091
-	source .env
-	set +a
+no_deps=false
+if [ "${1:-}" = "--no-deps" ]; then
+	no_deps=true
+	shift
 fi
 
-# Explicitly export AWS/S3 env vars to ensure docker compose picks them up from shell.
-export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}"
-export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}"
-export AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-}"
-export AWS_REGION="${AWS_REGION:-}"
-export S3_BUCKET="${S3_BUCKET:-}"
+mode="${1:-}"
+[ -n "$mode" ] || usage
+shift
 
-if [[ -f .env ]]; then
-	docker compose --env-file .env.versions --env-file .env "$@"
-else
-	docker compose --env-file .env.versions "$@"
+if [ "$#" -eq 0 ]; then
+	set -- llm-provost fluent-bit mcp-server api mongodb meilisearch
 fi
+
+compose() {
+	docker compose --env-file "$VERSIONS_FILE" -f "$COMPOSE_FILE" "$@"
+}
+
+case "$mode" in
+	up)
+		if [ "$no_deps" = true ]; then
+			compose up -d --no-deps llm-provost
+		else
+			compose up -d "$@"
+		fi
+		;;
+	down)
+		compose down --remove-orphans
+		;;
+	restart)
+		if [ "$no_deps" = true ]; then
+			compose up -d --force-recreate --no-deps llm-provost
+		else
+			compose restart "$@"
+		fi
+		;;
+	logs)
+		compose logs -f "$@"
+		;;
+	build)
+		compose build "$@"
+		;;
+	pull)
+		compose pull "$@"
+		;;
+	*)
+		usage
+		;;
+esac

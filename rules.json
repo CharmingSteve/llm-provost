@@ -1,140 +1,71 @@
 {
-  "max_trade_size": {
+  "tool_allowlist": {
     "enabled": true,
-    "description": "Block trades whose quantity exceeds the configured limit. Protects against oversized orders from a runaway agent.",
-    "params": {
-      "limit": 100
-    }
-  },
-  "max_trade_notional": {
-    "enabled": true,
-    "description": "Block trades whose dollar notional value exceeds the configured limit.",
-    "params": {
-      "limit": 50000
-    }
-  },
-  "inbound_request_rate_limit": {
-    "enabled": true,
-    "description": "Limit inbound request rate at the proxy boundary. Set rpm to 0 to disable.",
-    "params": {
-      "rpm": 0
-    }
-  },
-  "cumulative_trade_notional": {
-    "enabled": true,
-    "description": "Block cumulative dollar exposure across multiple orders within a short rolling window.",
-    "params": {
-      "limit": 50000,
-      "window_seconds": 300
-    }
-  },
-    "symbol_order_cooldown": {
-      "enabled": true,
-      "description": "Block repeat orders for the same symbol within a rolling time window. Prevents an agent from rapidly re-ordering the same ticker regardless of order type or quantity.",
-      "params": {
-        "window_seconds": 300
-      }
-    },
-  "blocked_tickers": {
-    "enabled": true,
-    "description": "Block trades on tickers that appear in the restricted symbol list. Prevents unauthorized exposure to specific securities.",
-    "params": {
-      "tickers": ["GME", "AMC", "BBBY"]
-    }
-  },
-  "allowed_tickers": {
-    "enabled": false,
-    "description": "Draconian Mode: Block ALL trades except for those in this explicit allowlist.",
-    "params": {
-      "tickers": ["SPY", "QQQ"]
-    }
-  },
-  "allowed_asset_classes": {
-    "enabled": true,
-    "description": "Allow trading only for listed asset classes.",
-    "params": {
-      "classes": ["us_equity", "crypto", "us_option"]
-    }
-  },
-  "forbidden_tools": {
-    "enabled": true,
-    "description": "Hard-block method+path endpoint templates before rule-based checks.",
+    "description": "Allow only approved MCP tools.",
     "params": {
       "tools": [
-        "DELETE /v2/positions",
-        "DELETE /v2/orders",
-        "DELETE /v1/trading/accounts/{account_id}/orders",
-        "DELETE /v1/trading/accounts/{account_id}/positions",
-        "POST /v1/transfers",
-        "POST /v1/journals",
-        "POST /v1/journals/batch",
-        "POST /v1/journals/reverse_batch",
-        "POST /v1/funding_wallets/withdrawals",
-        "POST /v1/crypto/wallets/withdrawals",
-        "POST /v1/crypto/wallets/whitelisted_addresses",
-        "POST /v1/instant_funding",
-        "POST /v1/trading/accounts/{account_id}/options/exercise",
-        "PATCH /v2/account/configurations",
-        "PATCH /v1/trading/accounts/{account_id}/account/configurations",
-        "POST /v1/rebalancing/runs",
-        "POST /v1/rebalancing/portfolios",
-        "PATCH /v1/rebalancing/portfolios/{portfolio_id}",
-        "POST /v1/rebalancing/subscriptions",
-        "POST /v1/crypto/perps/wallets/withdrawals",
-        "POST /v1/crypto/perps/wallets/whitelisted_addresses",
-        "POST /v1/crypto/perps/leverage"
+        "get_records",
+        "list_items",
+        "summarize_report",
+        "export_summary"
       ]
     }
   },
-  "max_replace_notional": {
+  "tool_blocklist": {
     "enabled": true,
-    "description": "Block order replacement requests when replacement notional exceeds policy limit.",
+    "description": "Block destructive or bulk-export operations.",
     "params": {
-      "limit": 10000
+      "tools": [
+        "delete_record",
+        "export_full_database"
+      ]
     }
   },
-  "prevent_market_order_upgrade": {
+  "rate_limits": {
     "enabled": true,
-    "description": "Block replacing limit orders with market orders.",
+    "description": "Apply per-tool rate limits.",
     "params": {
-      "enabled": true
+      "rules": {
+        "get_records": {
+          "max_calls": 10,
+          "window_seconds": 60
+        },
+        "summarize_report": {
+          "max_calls": 20,
+          "window_seconds": 300
+        }
+      }
     }
   },
-  "max_close_notional": {
+  "token_caps": {
     "enabled": true,
-    "description": "Block close-position requests above configured notional limit.",
+    "description": "Limit token-heavy requests.",
     "params": {
-      "limit": 10000
+      "max_tokens": 4096,
+      "max_prompt_tokens": 8192
     }
   },
-  "allowed_close_tickers": {
+  "time_based_rules": {
     "enabled": true,
-    "description": "Allow close-position requests only for configured symbols.",
+    "description": "Restrict selected tools to approved business hours.",
     "params": {
-      "tickers": ["AAPL", "MSFT", "ETH/USD"]
+      "rules": [
+        {
+          "tool": "export_summary",
+          "allowed_hours": "09:00-17:00",
+          "timezone": "America/New_York"
+        }
+      ]
     }
   },
-  "log_dne_requests": {
+  "logging_rules": {
     "enabled": true,
-    "description": "Allow but audit do-not-exercise broker requests.",
+    "description": "Require identity-rich audit logging.",
     "params": {
-      "enabled": true
-    }
-  },
-  "restricted_ticker_tool_rules": {
-    "enabled": true,
-    "description": "Block restricted ticker symbols when they are used by specific trade tools, regardless of argument field naming.",
-    "params": {
-      "tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
-      "tickers": ["GME", "AMC", "BBBY"]
-    }
-  },
-  "trading_window": {
-    "enabled": false,
-    "description": "Restrict automated trading to allowed UTC hours only. Disabled by default; enable and configure start_hour/end_hour to activate.",
-    "params": {
-      "start_hour": 13,
-      "end_hour": 21
+      "always_log_user_id": true,
+      "always_log_customer_id": true,
+      "always_log_tool_name": true,
+      "redact_prompt_content": false
     }
   }
 }

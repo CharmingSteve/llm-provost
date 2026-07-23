@@ -1,4 +1,4 @@
-title = "agent-provost gitleaks config"
+title = "llm-provost gitleaks config"
 
 [[allowlists]]
 description = "Allow historical mock token example in docs history"
