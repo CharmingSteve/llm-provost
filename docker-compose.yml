@@ -169,8 +169,7 @@ services:
       #OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OPENAI_REVERSE_PROXY: "${OPENAI_REVERSE_PROXY:-}"
       MCP_ALLOWED_DOMAINS: "http://llm-provost:8000"
-      ALLOW_SOCIAL_LOGIN: "${ALLOW_SOCIAL_LOGIN:-false}"
-
+      ALLOW_SOCIAL_LOGIN: true
     volumes:
       - ./config/librechat.yaml:/app/librechat.yaml:ro
       - librechat_images:/app/client/public/images
