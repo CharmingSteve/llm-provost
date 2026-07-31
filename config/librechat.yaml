@@ -1,5 +1,7 @@
 version: 1.2.3
 cache: true
+registration:
+  socialLogins: ["openid"]
 
 endpoints:
 #   anthropic:

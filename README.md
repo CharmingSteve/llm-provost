@@ -13,10 +13,11 @@ It is designed for secure, sovereign operation: you run it in your own environme
 
 LLM Provost provides all of the following in one control point:
 
-1. Governance checks on MCP tool calls
-2. Identity-aware structured audit logs
-3. Two-hop request/response traceability
-4. Hot-reload policy updates without proxy restarts
+[![LLM Provost Demo](https://img.youtube.com/vi/BEWJ4VHBHFk/0.jpg)](https://www.youtube.com/watch?v=BEWJ4VHBHFk)
+
+
+**👉 Launch on AWS Marketplace:** [LLM Provost AMI](https://aws.amazon.com/marketplace/pp/prodview-ouyql6wbwo6yg) soon!
+
 
 ## Four-Point Audit Trail
 
