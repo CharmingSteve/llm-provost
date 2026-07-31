@@ -10,7 +10,11 @@
 
 Use it when you need programmable guardrails, identity-aware audit trails, and rapid policy updates without restarting the proxy.
 
-**👉 Launch on AWS Marketplace:** [LLM Provost AMI](https://aws.amazon.com/marketplace/pp/prodview-ouyql6wbwo6yg)
+[![LLM Provost Demo](https://img.youtube.com/vi/BEWJ4VHBHFk/0.jpg)](https://www.youtube.com/watch?v=BEWJ4VHBHFk)
+
+
+**👉 Launch on AWS Marketplace:** [LLM Provost AMI](https://aws.amazon.com/marketplace/pp/prodview-ouyql6wbwo6yg) soon!
+
 
 ---
 
