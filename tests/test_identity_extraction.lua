@@ -107,6 +107,14 @@ describe("four-layer identity extraction", function()
         assert.equals("none", result.var.provost_conversation_id)
     end)
 
+    it("extracts chat identity from LibreChat's authenticated user header", function()
+        local result = run_policy({
+            uri = "/v1/chat/completions",
+            headers = {['X-Cognito-User'] = "user@example.com"},
+        })
+        assert.equals("user@example.com", result.var.provost_user_id)
+    end)
+
     it("defaults a chat user when no JWT is present", function()
         local result = run_policy({uri = "/v1/chat/completions"})
         assert.equals("steve", result.var.provost_user_id)

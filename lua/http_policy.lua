@@ -102,10 +102,8 @@ local headers = ngx.req.get_headers()
 local uri = ngx.var.uri or ""
 local is_mcp_path = uri:match("^/mcp/") ~= nil
 
-local user_id
-if is_mcp_path then
-    user_id = header(headers, "X-Cognito-User")
-else
+local user_id = header(headers, "X-Cognito-User")
+if type(user_id) ~= "string" or user_id == "" then
     user_id = decode_jwt_user(header(headers, "Authorization"))
 end
 if type(user_id) ~= "string" or user_id == "" then
