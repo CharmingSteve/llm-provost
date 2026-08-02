@@ -101,6 +101,16 @@ In this repository, example integration is shown in [config/librechat.yaml](conf
 - OpenWire-style endpoint traffic is routed through http://llm-provost:8000/v1
 - MCP tool traffic is routed through /mcp/<server>
 
+### LibreChat + Cognito Identity
+
+When LibreChat is used with Cognito, the recommended setup is:
+
+- request the `openid profile email phone` scope set in Cognito
+- map LibreChat's display name to `given_name` so the greeting uses the user's first name
+- forward LibreChat's authenticated email to the proxy as `X-Cognito-User`
+
+The local stack keeps the LibreChat OpenID settings in the mounted `.env` file so a rebuild does not wipe out Cognito login. The compose file no longer duplicates those OpenID variables at service level.
+
 ## Governance Policy Model
 
 Policy is defined in [rules.json](rules.json) and evaluated by Lua in [lua/rules_engine.lua](lua/rules_engine.lua).
@@ -124,6 +134,7 @@ See [RULES_ENGINE.md](RULES_ENGINE.md) for full rule documentation.
 ## Logging and Sovereignty
 
 LLM Provost emits structured JSON logs with request and response body capture for governed paths.
+The proxy resolves `user_id` from `X-Cognito-User` when LibreChat forwards an authenticated user email, and falls back to the Cognito JWT `sub` or email claim when needed.
 In the default stack, Fluent Bit ships logs to local files and optional S3 outputs.
 
 Key operational intent:

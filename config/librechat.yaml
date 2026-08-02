@@ -17,7 +17,7 @@ endpoints:
       baseURL: "http://llm-provost:8000/v1"
       headers:
         X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
-        X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
+        X-Cognito-User: "{{LIBRECHAT_USER_EMAIL}}"
       models:
         default:
           - "gpt-5-mini" # You can set a default, but fetch: true will grab the rest
@@ -34,5 +34,5 @@ mcpServers:
     type: streamable-http
     url: http://llm-provost:8000/mcp/dummy
     headers:
-      X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
+      X-Cognito-User: "{{LIBRECHAT_USER_EMAIL}}"
       X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
