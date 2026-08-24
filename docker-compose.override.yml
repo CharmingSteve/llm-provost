@@ -7,5 +7,7 @@ services:
 
   llm-provost:
     image: llm-provost:local
+    volumes:
+      - ./bootstrap.sh:/usr/local/bin/bootstrap.sh:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"

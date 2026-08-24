@@ -111,9 +111,15 @@ describe("Phase 4 audit contract", function()
         assert.truthy(access_block:find('"resp_body":"$resp_body"', 1, true))
         assert.truthy(config:find('set $req_body "";', 1, true))
         assert.truthy(config:find('set $resp_body "";', 1, true))
-        local v1_location = assert(config:match("location /v1/ {(.-)proxy_pass"))
-        assert.truthy(v1_location:find("body_filter_by_lua_block", 1, true))
-        assert.truthy(v1_location:find("local MAX_CAPTURE_BYTES = 65536", 1, true))
+        local location_start = assert(config:find(
+            "location ~ ^/llm/(?<backend_name>[^/]+)(/.*)$ {",
+            1,
+            true
+        ))
+        local proxy_pass = assert(config:find("proxy_pass", location_start, true))
+        local llm_location = config:sub(location_start, proxy_pass)
+        assert.truthy(llm_location:find("body_filter_by_lua_block", 1, true))
+        assert.truthy(llm_location:find("local MAX_CAPTURE_BYTES = 65536", 1, true))
     end)
 
     it("uses ordered error JSON and the Fluent Bit prefix", function()

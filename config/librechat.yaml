@@ -14,18 +14,21 @@ endpoints:
   custom:
     - name: "OpenWire"
       apiKey: "${OPENAI_API_KEY}"
-      baseURL: "http://llm-provost:8000/v1"
+      baseURL: "http://llm-provost:8000/llm/openwire/v1"
       headers:
         X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
-        X-Cognito-User: "{{LIBRECHAT_USER_EMAIL}}"
+        X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
       models:
         default:
           - "gpt-5-mini"
         fetch: true
 
-    - name: "Ollama-XPS"
-      apiKey: "ollama"
-      baseURL: "http://192.168.88.218:11434/v1"
+    - name: "Ollama"
+      apiKey: "${OLLAMA_API_KEY}"
+      baseURL: "http://llm-provost:8000/llm/ollama/v1"
+      headers:
+        X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+        X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
       models:
         default:
           - "llama3.1:8b"

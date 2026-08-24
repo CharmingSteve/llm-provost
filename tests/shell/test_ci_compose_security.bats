@@ -32,6 +32,22 @@
   [ "$status" -eq 0 ]
 }
 
+@test "LibreChat uses custom endpoints without the built-in OpenAI reverse proxy" {
+  run grep -E '^\s*ENDPOINTS:\s*"custom"$' docker-compose.yml
+  [ "$status" -eq 0 ]
+  run grep 'OPENAI_REVERSE_PROXY' .env .env.example docker-compose.yml
+  [ "$status" -ne 0 ]
+  run grep -F 'baseURL: "http://llm-provost:8000/llm/openwire/v1"' config/librechat.yaml
+  [ "$status" -eq 0 ]
+}
+
+@test "local proxy mounts current bootstrap environment loader" {
+  run grep -F './bootstrap.sh:/usr/local/bin/bootstrap.sh:ro' docker-compose.override.yml
+  [ "$status" -eq 0 ]
+  run grep -F 'LLM_ROUTES_JSON' bootstrap.sh
+  [ "$status" -eq 0 ]
+}
+
 @test "docker-compose.yml uses named runtime volume for provost socket" {
   run grep -E '^\s*- provost_run:/var/run/provost$' docker-compose.yml
   [ "$status" -eq 0 ]
