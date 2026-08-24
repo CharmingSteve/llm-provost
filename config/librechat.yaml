@@ -20,8 +20,17 @@ endpoints:
         X-Cognito-User: "{{LIBRECHAT_USER_EMAIL}}"
       models:
         default:
-          - "gpt-5-mini" # You can set a default, but fetch: true will grab the rest
+          - "gpt-5-mini"
         fetch: true
+
+    - name: "Ollama-XPS"
+      apiKey: "ollama"
+      baseURL: "http://192.168.88.218:11434/v1"
+      models:
+        default:
+          - "llama3.1:8b"
+        fetch: true
+    
 interface:
   mcpServers:
     use: true
@@ -30,9 +39,16 @@ interface:
     public: false
 
 mcpServers:
-  dummy:
-    type: streamable-http
-    url: http://llm-provost:8000/mcp/dummy
-    headers:
-      X-Cognito-User: "{{LIBRECHAT_USER_EMAIL}}"
-      X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+  atlassian:
+    type: sse
+    url: https://mcp.atlassian.com/v1/sse
+
+
+    #  dummy:
+#    type: streamable-http
+#    url: http://llm-provost:8000/mcp/dummy
+#    headers:
+#      X-Cognito-User: "{{LIBRECHAT_USER_EMAIL}}"
+#      X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+
+  
