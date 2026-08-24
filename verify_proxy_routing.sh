@@ -41,7 +41,7 @@ request() {
 }
 
 CHAT_PAYLOAD='{"model":"verification-model","messages":[{"role":"user","content":"routing check"}]}'
-chat_status=$(request "$CHAT_HEADERS" "$CHAT_BODY" "$PROVOST_URL/v1/chat/completions" "$CHAT_PAYLOAD") || \
+chat_status=$(request "$CHAT_HEADERS" "$CHAT_BODY" "$PROVOST_URL/llm/openwire/v1/chat/completions" "$CHAT_PAYLOAD") || \
     fail "Path A request could not reach the proxy"
 
 case "$chat_status" in

@@ -4,6 +4,12 @@ local routes = require("routes")
 local rules_engine = require("rules_engine")
 
 local MAX_REQUEST_BYTES = 1048576
+local llm_routes_json = os.getenv("LLM_ROUTES_JSON")
+local llm_routes = cjson.decode(llm_routes_json or "")
+
+if type(llm_routes) ~= "table" then
+    llm_routes = nil
+end
 
 local function header(headers, name)
     return headers[name] or headers[name:lower()]
@@ -98,6 +104,18 @@ local function reject(reason, status, error_code)
     return ngx.exit(status)
 end
 
+local function reject_route(reason, status, error_code)
+    local response_body = cjson.encode({ error = reason })
+    ngx.var.resp_body = response_body
+    audit_error.emit("provost_request_error", status, error_code, reason, {
+        resp_body = response_body,
+    })
+    ngx.status = status
+    ngx.header["Content-Type"] = "application/json"
+    ngx.say(response_body)
+    return ngx.exit(status)
+end
+
 local headers = ngx.req.get_headers()
 local uri = ngx.var.uri or ""
 local is_mcp_path = uri:match("^/mcp/") ~= nil
@@ -160,7 +178,36 @@ ngx.ctx.customer_id = customer_id
 ngx.var.provost_customer_id = customer_id
 
 if not is_mcp_path then
-    ngx.var.llm_target_url = os.getenv("LLM_API_URL") or ""
+    if not llm_routes then
+        return reject_route(
+            "LLM backend routing is not configured",
+            ngx.HTTP_INTERNAL_SERVER_ERROR,
+            "LLM_ROUTES_INVALID"
+        )
+    end
+
+    local backend_name = ngx.var.backend_name
+    local backend_url = backend_name and llm_routes[backend_name]
+    if type(backend_url) ~= "string" then
+        return reject_route(
+            "Unknown LLM backend: " .. (backend_name or ""),
+            ngx.HTTP_NOT_FOUND,
+            "LLM_BACKEND_UNKNOWN"
+        )
+    end
+    if not backend_url:match("^https?://[^%s/#@]+[^%s#@]*$") then
+        return reject_route(
+            "LLM backend routing is not configured",
+            ngx.HTTP_INTERNAL_SERVER_ERROR,
+            "LLM_ROUTE_INVALID"
+        )
+    end
+
+    local backend_path = uri:match("^/llm/[^/]+/v1(.*)$")
+    if backend_path == nil then
+        return reject_route("Invalid LLM backend path", ngx.HTTP_NOT_FOUND, "LLM_PATH_INVALID")
+    end
+    ngx.var.llm_target_url = backend_url:gsub("/$", "") .. backend_path
 end
 
 local allowed, reason = rules_engine.check_request(

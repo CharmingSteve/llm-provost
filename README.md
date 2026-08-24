@@ -98,8 +98,32 @@ Any client that can call an OpenAI-compatible endpoint and/or MCP endpoint throu
 
 In this repository, example integration is shown in [config/librechat.yaml](config/librechat.yaml) where:
 
-- OpenWire-style endpoint traffic is routed through http://llm-provost:8000/v1
+- OpenWire traffic is routed through http://llm-provost:8000/llm/openwire/v1
+- Ollama traffic is routed through http://llm-provost:8000/llm/ollama/v1
 - MCP tool traffic is routed through /mcp/<server>
+
+### Multiple LLM Backends
+
+Define every allowed LLM backend in `.env` as one JSON object. Backend names become the first path segment after `/llm/`, and each value is the upstream API base URL:
+
+```sh
+LLM_ROUTES_JSON={"openwire":"http://host.docker.internal:3030/v1","ollama":"http://xps:11434/v1","bedrock":"https://bedrock-runtime.us-east-1.amazonaws.com"}
+```
+
+A client configured with `http://llm-provost:8000/llm/openwire/v1` therefore sends chat completions to the `openwire` URL. Add another backend by adding a unique lowercase name and an HTTP or HTTPS URL to the JSON object, then restart the proxy so OpenResty reloads its environment. Unknown backend names return HTTP 404; missing, malformed, or invalid routing configuration fails closed with HTTP 500. There is no single-backend fallback.
+
+Keep credentials in their existing environment variables, such as `OPENAI_API_KEY` and `OLLAMA_API_KEY`; do not put credentials in backend URLs. LLM requests continue through the same policy, Cognito identity extraction, four-layer ID logging, request/response audit capture, and authorization forwarding used by the original route. MCP routing remains configured separately in `mcp_routes.json`.
+
+### Routing Tests
+
+Run the focused routing checks from the repository root:
+
+```sh
+busted tests/lua/proxy_headers_spec.lua tests/lua/circuit_breaker_spec.lua
+bats tests/shell/test_entrypoint.bats tests/shell/test_verify_proxy_routing.bats
+```
+
+For a running stack, `sh verify_proxy_routing.sh` probes `/llm/openwire/v1/chat/completions` and `/mcp/dummy`, verifies the four identity layers, and checks that the bearer token is absent from logs.
 
 ### LibreChat + Cognito Identity
 
@@ -107,7 +131,7 @@ When LibreChat is used with Cognito, the recommended setup is:
 
 - request the `openid profile email phone` scope set in Cognito
 - map LibreChat's display name to `given_name` so the greeting uses the user's first name
-- forward LibreChat's authenticated email to the proxy as `X-Cognito-User`
+- forward LibreChat's authenticated user ID to the proxy as `X-Cognito-User`
 
 The local stack keeps the LibreChat OpenID settings in the mounted `.env` file so a rebuild does not wipe out Cognito login. The compose file no longer duplicates those OpenID variables at service level.
 

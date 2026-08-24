@@ -39,7 +39,7 @@ load_env_file() {
     return
   fi
 
-  for key in $SECRET_KEYS AWS_REGION S3_BUCKET LLM_API_URL; do
+  for key in $SECRET_KEYS AWS_REGION S3_BUCKET LLM_ROUTES_JSON; do
     value=$(env_get "$key" "$ENV_FILE" || true)
     if [ -n "$value" ]; then
       export "$key=$value"
@@ -75,7 +75,7 @@ load_secrets_manager() {
 }
 
 emit_environment() {
-  for key in $SECRET_KEYS AWS_REGION S3_BUCKET LLM_API_URL; do
+  for key in $SECRET_KEYS AWS_REGION S3_BUCKET LLM_ROUTES_JSON; do
     eval "value=\${$key:-}"
     emit_export_or_unset "$key" "$value"
   done
@@ -93,6 +93,7 @@ case "$MODE" in
     ;;
   ec2)
     create_default_routes
+    load_env_file
     load_secrets_manager
     emit_environment
     ;;

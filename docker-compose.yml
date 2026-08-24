@@ -160,8 +160,6 @@ services:
       MEILI_HOST: "http://meilisearch:7700"
       MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-provost-dev-meili-key}"
       ENDPOINTS: "custom"
-      #OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
-      OPENAI_REVERSE_PROXY: "${OPENAI_REVERSE_PROXY:-}"
       MCP_ALLOWED_DOMAINS: "http://llm-provost:8000"
       ALLOW_SOCIAL_LOGIN: true
     volumes:
