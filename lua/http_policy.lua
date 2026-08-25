@@ -1,4 +1,5 @@
 local cjson = require("cjson.safe")
+local audit_body = require("audit_body")
 local audit_error = require("audit_error")
 local routes = require("routes")
 local rules_engine = require("rules_engine")
@@ -156,7 +157,7 @@ if not body then
     ngx.var.req_body = ""
     return reject(body_error, ngx.HTTP_INTERNAL_SERVER_ERROR, "REQUEST_BODY_READ_ERROR")
 end
-ngx.var.req_body = body
+ngx.var.req_body = audit_body.compact_request(body, os.getenv("AUDIT_LOG_MODE") or "compact")
 ngx.ctx.request_body = body
 local customer_id = "craig"
 local parsed = is_mcp_path and cjson.decode(body) or nil
