@@ -6,6 +6,7 @@
 globals = {
     "ngx",
     "cjson",
+    "encode_record",
 }
 
 -- Relax unused-variable warnings that are common in busted describe/it blocks.

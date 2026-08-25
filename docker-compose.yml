@@ -90,6 +90,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
     environment:
       LLM_API_KEY: ${LLM_API_KEY:-}
+      AUDIT_LOG_MODE: ${AUDIT_LOG_MODE:-compact}
       MCP_ROUTING_TABLE_PATH: /etc/nginx/mcp_routes/mcp_routes.json
       TZ: ${TZ:-Asia/Jerusalem}
     networks:

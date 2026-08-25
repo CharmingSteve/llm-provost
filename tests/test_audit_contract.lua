@@ -106,7 +106,7 @@ describe("Phase 4 audit contract", function()
         end
     end)
 
-    it("captures request and response bodies with a bounded filter", function()
+    it("captures request and response bodies with incremental streaming", function()
         assert.truthy(access_block:find('"request_body":"$req_body"', 1, true))
         assert.truthy(access_block:find('"resp_body":"$resp_body"', 1, true))
         assert.truthy(config:find('set $req_body "";', 1, true))
@@ -119,7 +119,13 @@ describe("Phase 4 audit contract", function()
         local proxy_pass = assert(config:find("proxy_pass", location_start, true))
         local llm_location = config:sub(location_start, proxy_pass)
         assert.truthy(llm_location:find("body_filter_by_lua_block", 1, true))
-        assert.truthy(llm_location:find("local MAX_CAPTURE_BYTES = 65536", 1, true))
+        assert.truthy(llm_location:find(
+            'require("audit_body").capture(ngx.arg[1], ngx.arg[2])',
+            1,
+            true
+        ))
+        assert.falsy(config:find("MAX_CAPTURE_BYTES", 1, true))
+        assert.truthy(config:find('require("audit_access").init()', 1, true))
     end)
 
     it("uses ordered error JSON and the Fluent Bit prefix", function()
@@ -133,7 +139,7 @@ describe("Phase 4 audit contract", function()
             true
         ))
         assert.falsy(audit_lua:find("ngx.get_phase", 1, true))
-        assert.falsy(config:find("log_by_lua", 1, true))
+        assert.truthy(config:find('require("audit_error").emit_response_failure()', 1, true))
     end)
 
     it("adds MCP routing fields immediately after conversation identity", function()
@@ -191,5 +197,53 @@ describe("Phase 4 audit contract", function()
         local record = assert(cjson.decode(emitted:sub(#"PROVOST_AUDIT_ERROR " + 1)))
         assert.truthy(record.request_body:find("[truncated]", 1, true))
         assert.equals('{"error":"blocked"}', record.resp_body)
+    end)
+
+    it("classifies response failures and deduplicates policy errors", function()
+        local emitted = {}
+        local mock_ngx = {
+            ERR = "error",
+            ctx = {},
+            status = 499,
+            var = {
+                time_local = "time",
+                remote_addr = "127.0.0.1",
+                request = "POST /llm/openwire/v1/chat/completions HTTP/1.1",
+                request_id = "request-id",
+                req_body = "{}",
+                resp_body = "{}",
+            },
+            req = {
+                get_headers = function()
+                    return {}
+                end,
+            },
+            utctime = function()
+                return "2026-08-25 00:00:00"
+            end,
+            log = function(_, message)
+                emitted[#emitted + 1] = message
+            end,
+        }
+        local environment = setmetatable({ngx = mock_ngx}, {__index = _G})
+        local audit = load_with_environment("lua/audit_error.lua", environment)
+
+        audit.emit_response_failure()
+        assert.truthy(emitted[1]:find('"error_code":"CLIENT_ABORTED"', 1, true))
+
+        mock_ngx.ctx.audit_error_emitted = nil
+        mock_ngx.status = 504
+        audit.emit_response_failure()
+        assert.truthy(emitted[2]:find('"error_code":"UPSTREAM_TIMEOUT"', 1, true))
+
+        mock_ngx.ctx.audit_error_emitted = nil
+        mock_ngx.ctx.audit_response_interrupted = true
+        mock_ngx.status = 200
+        audit.emit_response_failure()
+        assert.truthy(emitted[3]:find('"error_code":"RESPONSE_INTERRUPTED"', 1, true))
+
+        mock_ngx.ctx.audit_error_emitted = true
+        audit.emit_response_failure()
+        assert.equals(3, #emitted)
     end)
 end)

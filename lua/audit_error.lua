@@ -174,7 +174,47 @@ function _M.emit(tag, status_code, error_code, error_detail, opts)
     end
 
     local encoded = encode_or_fallback(fields)
+    if ngx.ctx then
+        ngx.ctx.audit_error_emitted = true
+    end
+    if ngx.socket and ngx.timer then
+        local ok, err = require("audit_access").emit_error(encoded)
+        if not ok then
+            error("structured error audit failed closed: " .. tostring(err))
+        end
+    end
     ngx.log(ngx.ERR, "PROVOST_AUDIT_ERROR " .. encoded)
+end
+
+function _M.emit_response_failure()
+    if ngx.ctx and ngx.ctx.audit_error_emitted then
+        return
+    end
+
+    local status = tonumber(ngx.status)
+    local failures = {
+        [499] = { "provost_client_error", "CLIENT_ABORTED", "Client closed the request before completion" },
+        [500] = { "provost_upstream_error", "PROXY_INTERNAL_ERROR", "Proxy request failed" },
+        [502] = { "provost_upstream_error", "UPSTREAM_BAD_GATEWAY", "Upstream returned an invalid response" },
+        [503] = { "provost_upstream_error", "UPSTREAM_UNAVAILABLE", "Upstream service unavailable" },
+        [504] = { "provost_upstream_error", "UPSTREAM_TIMEOUT", "Upstream response timed out" },
+    }
+    local failure = failures[status]
+    if not failure and status and status >= 500 then
+        failure = { "provost_upstream_error", "UPSTREAM_FAILURE", "Upstream request failed" }
+    end
+    if not failure and ngx.ctx and ngx.ctx.audit_response_interrupted then
+        failure = {
+            "provost_client_error",
+            "RESPONSE_INTERRUPTED",
+            "Response stream ended before completion",
+        }
+    end
+    if not failure then
+        return
+    end
+
+    _M.emit(failure[1], status, failure[2], failure[3])
 end
 
 return _M
