@@ -28,6 +28,26 @@ create_default_routes() {
   fi
 }
 
+write_secret_file() {
+  value="$1"
+  path="$2"
+  printf '%s' "$value" > "$path"
+  chmod 600 "$path"
+}
+
+# Stage the Alpaca MCP server's file-based secrets (mounted at /run/secrets)
+# so alpaca-mcp can start and the forbidden-endpoint integration test can
+# authenticate against the outbound ledger.
+stage_alpaca_secrets() {
+  if [ -z "${PROVOST_SECRETS_DIR:-}" ] || [ ! -d "$PROVOST_SECRETS_DIR" ]; then
+    PROVOST_SECRETS_DIR=$(mktemp -d)
+  fi
+  chmod 700 "$PROVOST_SECRETS_DIR"
+  write_secret_file "${ALPACA_API_KEY:-dummy}" "$PROVOST_SECRETS_DIR/alpaca_api_key"
+  write_secret_file "${ALPACA_SECRET_KEY:-dummy}" "$PROVOST_SECRETS_DIR/alpaca_secret_key"
+  write_secret_file "${ALPACA_PAPER_TRADE:-true}" "$PROVOST_SECRETS_DIR/alpaca_paper_trade"
+}
+
 json_get() {
   key="$1"
   python3 -c 'import json, sys; print(json.load(sys.stdin).get(sys.argv[1], ""))' "$key"
@@ -89,7 +109,9 @@ case "$MODE" in
     ;;
   runner)
     create_default_routes
+    stage_alpaca_secrets
     emit_environment
+    echo "export PROVOST_SECRETS_DIR='$PROVOST_SECRETS_DIR'"
     ;;
   ec2)
     create_default_routes

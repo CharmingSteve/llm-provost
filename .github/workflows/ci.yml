@@ -37,6 +37,7 @@ jobs:
           shellcheck entrypoint.sh
           shellcheck alpaca-entrypoint.sh
           shellcheck verify_proxy_routing.sh
+          shellcheck tests/test_forbidden_endpoints.sh
           find scripts -type f -name "*.sh" -exec shellcheck {} +
 
   # ── Dockerfile linting ─────────────────────────────────────────────────────
@@ -204,8 +205,8 @@ jobs:
       - name: Bring up compose stack
         run: |
           set -euo pipefail
-          export MCP_API_KEY="dummy"
-          export MCP_SECRET_KEY="dummy"
+          export ALPACA_API_KEY="dummy"
+          export ALPACA_SECRET_KEY="dummy"
           set +e
           docker compose --env-file .env.versions pull
           docker compose --env-file .env.versions up -d
@@ -424,17 +425,17 @@ jobs:
 
   # ── Credentials gate (sets output used by integration-tests) ─────────────────
   check-credentials:
-    name: Check MCP credentials
+    name: Check Alpaca credentials
     runs-on: ubuntu-24.04-arm
     outputs:
       enabled: ${{ steps.gate.outputs.enabled }}
     steps:
       - id: gate
         env:
-          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
-          MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
         run: |
-          if [ -n "$MCP_API_KEY" ] && [ -n "$MCP_SECRET_KEY" ]; then
+          if [ -n "$ALPACA_API_KEY" ] && [ -n "$ALPACA_SECRET_KEY" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
@@ -483,8 +484,8 @@ jobs:
         run: sudo apt-get install -y jq
       - name: Stage real secrets for integration tests
         env:
-          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
-          MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: "us-east-1"
@@ -517,8 +518,8 @@ jobs:
       - name: Run Integration Tests
         env:
           BOOTSTRAP_MODE: runner
-          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
-          MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
           S3_BUCKET: "ap-logs-863750994059-us-east-1-ci-test"
           S3_KEY_PREFIX: "ci-run-${{ github.run_id }}/"
           VERIFY_S3_BUCKET: "ap-logs-863750994059-us-east-1-ci-test"
@@ -532,13 +533,11 @@ jobs:
       - name: Run forbidden endpoint test
         env:
           BOOTSTRAP_MODE: runner
-          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
-          MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
         run: |
           set -euo pipefail
           eval "$(sh bootstrap.sh runner)"
-          PROVOST_TOKEN="$(tr -d '\r\n' < "$PROVOST_SECRETS_DIR/provost_token")"
-          export PROVOST_TOKEN
           ./tests/test_forbidden_endpoints.sh
       - name: Debug Container State
         if: always()
@@ -793,8 +792,8 @@ jobs:
         if: env.IMAGE_CHANGED == 'true'
         run: |
           set -euo pipefail
-          export MCP_API_KEY="dummy"
-          export MCP_SECRET_KEY="dummy"
+          export ALPACA_API_KEY="dummy"
+          export ALPACA_SECRET_KEY="dummy"
           mkdir -p logs/fluent-bit-storage
            chmod -R a+rwx logs/fluent-bit-storage
           docker compose --env-file .env.versions up -d
