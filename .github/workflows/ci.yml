@@ -443,7 +443,6 @@ jobs:
   # ── Integration tests (requires MCP credentials) ───────────────────────────
   integration-tests:
     name: Integration tests (end-to-end)
-    if: always()
     runs-on: ubuntu-24.04-arm
     needs: [check-credentials, test-lua, test-shell, build-secure-push-test]
     if: ${{ always() && needs.check-credentials.outputs.enabled == 'true' }}
