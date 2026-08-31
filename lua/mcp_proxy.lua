@@ -49,6 +49,7 @@ headers.host = nil
 headers.Host = nil
 headers["content-length"] = nil
 headers["Content-Length"] = nil
+headers["X-Provost-Request-Id"] = ngx.var.provost_req_id
 
 local client = http.new()
 client:set_timeout(30000)

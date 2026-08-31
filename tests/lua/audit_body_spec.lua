@@ -1,3 +1,5 @@
+package.path = package.path .. ";lua/?.lua"
+
 local audit_body = require("audit_body")
 local cjson = require("cjson.safe")
 

@@ -25,6 +25,40 @@ services:
     pids_limit: 256
     restart: unless-stopped
 
+  alpaca-mcp:
+    # Alpaca MCP server (ported from Agent Provost). Its REST calls are routed
+    # back through llm-provost:8081 so the outbound hop is governed and audited.
+    # Digest is sourced from .env.versions via: docker compose --env-file .env.versions.
+    # It is built from the alpaca-mcp.Dockerfile in the root of this repo.
+    image: ${ALPACA_IMAGE}@${ALPACA_IMAGE_TAG}
+    pull_policy: if_not_present
+    container_name: alpaca-mcp
+    volumes:
+      - ./alpaca-entrypoint.sh:/entrypoint.sh:ro
+      - ${PROVOST_SECRETS_DIR:-./.secrets}:/run/secrets:ro
+      - /etc/localtime:/etc/localtime:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      TRADE_API_URL: "http://llm-provost:8081/trading"
+      DATA_API_URL: "http://llm-provost:8081/data"
+      BROKER_API_URL: "http://llm-provost:8081/broker"
+      ALPACA_API_KEY: ${ALPACA_API_KEY:-}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
+      TZ: ${TZ:-Asia/Jerusalem}
+    expose:
+      - "8088"
+    networks:
+      - mcp_internal
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    pids_limit: 256
+    restart: unless-stopped
+
   fluent-bit:
     image: ${FLUENT_BIT_IMAGE}
     pull_policy: if_not_present
@@ -72,6 +106,8 @@ services:
     working_dir: /app
     depends_on:
       mcp-server:
+        condition: service_started
+      alpaca-mcp:
         condition: service_started
       fluent-bit:
         condition: service_healthy
