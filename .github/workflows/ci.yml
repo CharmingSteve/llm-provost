@@ -693,6 +693,7 @@ jobs:
 
           if [ -z "${base}" ] || [ "${base}" = "0000000000000000000000000000000000000000" ]; then
             echo "IMAGE_CHANGED=true" >> "$GITHUB_ENV"
+            echo "ALPACA_IMAGE_CHANGED=true" >> "$GITHUB_ENV"
             echo "Detected initial/unknown diff range; forcing image push."
             exit 0
           fi
@@ -707,6 +708,14 @@ jobs:
           else
             echo "IMAGE_CHANGED=false" >> "$GITHUB_ENV"
             echo "Image-defining files unchanged; build/push skipped."
+          fi
+
+          if printf '%s\n' "${changed_files}" | grep -Eq '^(alpaca-mcp\.Dockerfile|hash-pip/requirements-alpaca\.txt|\.env\.versions)$'; then
+            echo "ALPACA_IMAGE_CHANGED=true" >> "$GITHUB_ENV"
+            echo "Alpaca image-defining files changed; build/push enabled."
+          else
+            echo "ALPACA_IMAGE_CHANGED=false" >> "$GITHUB_ENV"
+            echo "Alpaca image-defining files unchanged; build/push skipped."
           fi
       - name: Skip push when image inputs are unchanged
         if: env.IMAGE_CHANGED != 'true'
@@ -787,6 +796,53 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "ci: pin MCP_IMAGE_TAG to ECR digest [skip ci]"
+          file_pattern: .env.versions
+      - name: Step 5 (Build alpaca-mcp)
+        if: env.ALPACA_IMAGE_CHANGED == 'true'
+        run: |
+          set -euo pipefail
+          docker build -f alpaca-mcp.Dockerfile \
+            --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" \
+            -t public.ecr.aws/e2u9m9o7/llm-provost:alpaca-mcp-latest \
+            -t public.ecr.aws/e2u9m9o7/llm-provost:alpaca-mcp-"${IMAGE_SHA_TAG}" .
+      - name: Step 6 (Push alpaca-mcp)
+        if: env.ALPACA_IMAGE_CHANGED == 'true'
+        run: |
+          set -euo pipefail
+          docker push public.ecr.aws/e2u9m9o7/llm-provost:alpaca-mcp-latest
+          docker push public.ecr.aws/e2u9m9o7/llm-provost:alpaca-mcp-"${IMAGE_SHA_TAG}"
+      - name: Step 7 (Pin immutable alpaca-mcp digest in .env.versions)
+        if: env.ALPACA_IMAGE_CHANGED == 'true'
+        run: |
+          set -euo pipefail
+          REPOSITORY_NAME="${ALPACA_IMAGE##*/}"
+          ALPACA_DIGEST=""
+          for attempt in $(seq 1 12); do
+            ALPACA_DIGEST="$(aws ecr-public describe-images \
+              --region us-east-1 \
+              --repository-name "${REPOSITORY_NAME}" \
+              --image-ids imageTag="alpaca-mcp-${IMAGE_SHA_TAG}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text 2>/dev/null || true)"
+            if echo "${ALPACA_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
+              break
+            fi
+            echo "Digest not yet available for ${REPOSITORY_NAME}:alpaca-mcp-${IMAGE_SHA_TAG} (attempt ${attempt}/12)"
+            sleep 5
+          done
+
+          if ! echo "${ALPACA_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
+            echo "::error::Failed to resolve ECR digest for ${REPOSITORY_NAME}:alpaca-mcp-${IMAGE_SHA_TAG}"
+            exit 1
+          fi
+
+          sed -i "s|^ALPACA_IMAGE_TAG=.*|ALPACA_IMAGE_TAG=${ALPACA_DIGEST}|" .env.versions
+      - name: Step 7b (Commit pinned alpaca-mcp digest back to branch)
+        if: env.ALPACA_IMAGE_CHANGED == 'true'
+        continue-on-error: true
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "ci: pin ALPACA_IMAGE_TAG to ECR digest [skip ci]"
           file_pattern: .env.versions
       - name: Step 5 (Sanity/Integration Tests)
         if: env.IMAGE_CHANGED == 'true'
