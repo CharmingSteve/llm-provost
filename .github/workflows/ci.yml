@@ -189,6 +189,10 @@ jobs:
         run: |
           set -euo pipefail
           eval "$(sh bootstrap.sh runner)"
+          # docker bind-mounts a missing host path as a directory, which breaks
+          # the api service's "./.env:/app/.env:ro" file mount; .env is
+          # gitignored so it never exists on a fresh runner checkout.
+          touch .env
       - name: Build proxy Dockerfile
         run: |
           set -euo pipefail
@@ -515,6 +519,15 @@ jobs:
         run: |
           mkdir -p logs/fluent-bit-storage/final
           chmod -R a+rwx logs/fluent-bit-storage
+      - name: Bring up compose stack
+        run: |
+          set -euo pipefail
+          # docker bind-mounts a missing host path as a directory, which breaks
+          # the api service's "./.env:/app/.env:ro" file mount; .env is
+          # gitignored so it never exists on a fresh runner checkout.
+          touch .env
+          docker compose --env-file .env.versions up -d
+          docker compose --env-file .env.versions ps
       - name: Run Integration Tests
         env:
           BOOTSTRAP_MODE: runner
@@ -848,8 +861,11 @@ jobs:
         if: env.IMAGE_CHANGED == 'true'
         run: |
           set -euo pipefail
-          export ALPACA_API_KEY="dummy"
-          export ALPACA_SECRET_KEY="dummy"
+          eval "$(sh bootstrap.sh runner)"
+          # docker bind-mounts a missing host path as a directory, which breaks
+          # the api service's "./.env:/app/.env:ro" file mount; .env is
+          # gitignored so it never exists on a fresh runner checkout.
+          touch .env
           mkdir -p logs/fluent-bit-storage
            chmod -R a+rwx logs/fluent-bit-storage
           docker compose --env-file .env.versions up -d
