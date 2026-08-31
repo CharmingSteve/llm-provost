@@ -221,9 +221,22 @@ local allowed, reason = rules_engine.check_request(
         customer_id = customer_id,
         conversation_id = conversation_id,
         is_mcp_path = is_mcp_path,
+        mcp_server_name = ngx.ctx.mcp_server_name,
+        store = ngx.shared.provost_ctx,
     }
 )
 
 if not allowed then
     return reject(reason)
+end
+
+-- Persist the 4-layer identity so the outbound MCP-to-API hop (port 8081)
+-- can restore it even when the MCP server strips provost headers.
+if is_mcp_path then
+    require("outbound_identity").store(
+        ngx.var.provost_req_id,
+        user_id,
+        customer_id,
+        conversation_id
+    )
 end

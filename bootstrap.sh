@@ -24,7 +24,7 @@ emit_export_or_unset() {
 
 create_default_routes() {
   if [ ! -f "$MCP_ROUTES_FILE" ]; then
-    printf '%s\n' '{' '  "dummy": "http://mcp-server:8088"' '}' > "$MCP_ROUTES_FILE"
+    printf '%s\n' '{' '  "dummy": "http://mcp-server:8088",' '  "alpaca": "http://alpaca-mcp:8088"' '}' > "$MCP_ROUTES_FILE"
   fi
 }
 

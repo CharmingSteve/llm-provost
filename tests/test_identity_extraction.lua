@@ -1,3 +1,5 @@
+package.path = package.path .. ";lua/?.lua"
+
 local cjson = require("cjson.safe")
 
 local function run_policy(options)
