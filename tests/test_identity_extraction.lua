@@ -35,6 +35,7 @@ local function run_policy(options)
     end
 
     local headers = options.headers or {}
+    headers["X-Provost-Token"] = headers["X-Provost-Token"] or "test-provost-token"
     local body = options.body or ""
     ngx = {
         ctx = {},
@@ -91,6 +92,7 @@ local function run_policy(options)
         HTTP_FORBIDDEN = 403,
         HTTP_NOT_FOUND = 404,
         HTTP_INTERNAL_SERVER_ERROR = 500,
+        HTTP_UNAUTHORIZED = 401,
     }
 
     local policy_os = setmetatable({
@@ -98,6 +100,9 @@ local function run_policy(options)
             if name == "LLM_ROUTES_JSON" then
                 return options.routes_json
                     or '{"openwire":"http://openwire:3030/v1","ollama":"http://ollama:11434/v1"}'
+            end
+            if name == "PROVOST_TOKEN" then
+                return "test-provost-token"
             end
             return os.getenv(name)
         end,
