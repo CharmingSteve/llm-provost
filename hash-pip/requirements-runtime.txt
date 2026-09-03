@@ -40,11 +40,11 @@ uv==0.11.15 \
     --hash=sha256:f9f4fbbf4fe485522054f3c7496c6e8e932d6436e4200ff3daf718db0b7c7bd5
 
 # Package: setuptools
-# Version represented by these hashes: 83.0.0
-# Upgraded from 82.0.1; fixes PYSEC-2026-3447
-setuptools==83.0.0 \
-    --hash=sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3 \
-    --hash=sha256:025bccbbf0fa05b6192bc64ae1e7b16e001fd6d6d4d5de03c97b1c1ade523bef
+# Version represented by these hashes: 84.0.0
+# Upgraded from 83.0.0; fixes CVE-2025-47273.
+setuptools==84.0.0 \
+    --hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670 \
+    --hash=sha256:f4695c21257f0d9b537ec2692c941d02ee143b7cc1276941349a546573b2ef73
 
 # Package: wheel
 # Version represented by these hashes: 0.46.3
