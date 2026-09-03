@@ -55,6 +55,11 @@ setup() {
   [ -f "$ROOT_DIR/lua/outbound_identity.lua" ]
 }
 
+@test "audit records use the Fluent Bit S3 output tags" {
+  grep -q 'Match                 provost.access$' "$ROOT_DIR/fluent-bit/conf.d/output-s3.conf"
+  grep -q 'Match                 provost.error$' "$ROOT_DIR/fluent-bit/conf.d/output-s3.conf"
+}
+
 @test "merge contract: unified suite completes with 0 failed governance preconditions" {
   grep -q "check_http_request" "$ROOT_DIR/lua/trading_rules.lua"
   grep -q "mcp_servers" "$ROOT_DIR/lua/rules_engine.lua"
