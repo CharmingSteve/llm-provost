@@ -6,7 +6,7 @@
 }
 
 @test ".env.versions pins openresty image by digest" {
-  run grep -E '^OPENRESTY_IMAGE=openresty/openresty@sha256:[a-f0-9]{64}$' .env.versions
+  run grep -E '^OPENRESTY_IMAGE=(openresty/openresty|public\.ecr\.aws/e2u9m9o7/llm-provost)@sha256:[a-f0-9]{64}$' .env.versions
   [ "$status" -eq 0 ]
 }
 
@@ -190,23 +190,23 @@
   [ "$status" -eq 0 ]
 }
 
-@test "requirements-runtime.txt pins pip to CVE-clean version 26.1" {
-  # pip==26.0.1 has CVE-2026-3219; only 26.1 or newer is clean
-  run grep -E '^pip==26\.1' hash-pip/requirements-runtime.txt
+@test "requirements-runtime.txt pins pip to CVE-clean version 26.2" {
+  # pip==26.1.2 has PYSEC-2026-3721; pip 26.2 contains the fix.
+  run grep -E '^pip==26\.2 \\' hash-pip/requirements-runtime.txt
   [ "$status" -eq 0 ]
   # Must NOT contain the vulnerable version
   run grep -E '^pip==26\.0\.1' hash-pip/requirements-runtime.txt
   [ "$status" -ne 0 ]
 }
 
-@test "requirements-runtime.txt pip 26.1 hashes match known-good PyPI sha256" {
-  # Hashes sourced from https://pypi.org/pypi/pip/26.1.2/json
+@test "requirements-runtime.txt pip 26.2 hashes match known-good PyPI sha256" {
+  # Hashes sourced from https://pypi.org/pypi/pip/26.2/json
   # whl artifact sha256
-  run grep -F 'sha256:382ff9f685ee3bc25864f820aa50505825f10f5458ffff07e30a6d96e5715cab' \
+  run grep -F 'sha256:931c303696af6fa3417112103b1cad26890e5a07eccb5b99783700e33f2b8aad' \
     hash-pip/requirements-runtime.txt
   [ "$status" -eq 0 ]
   # sdist artifact sha256
-  run grep -F 'sha256:f49cd134c61cf2fd75e0ce2676db03e4054504a5a4986d00f8299ae632dc4605' \
+  run grep -F 'sha256:2d8542afcc84cdd8e846c2b36b2861fad1da376dd98f8e7113e9108a3c331690' \
     hash-pip/requirements-runtime.txt
   [ "$status" -eq 0 ]
 }

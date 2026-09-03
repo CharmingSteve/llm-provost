@@ -534,6 +534,17 @@ jobs:
           touch .env
           docker compose --env-file .env.versions up -d
           docker compose --env-file .env.versions ps
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            if curl --fail --silent --show-error http://localhost:8000/health; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              echo "::error::llm-provost did not become ready"
+              exit 1
+            fi
+            echo "::warning::llm-provost is not ready (attempt ${attempt}/12); retrying"
+            sleep 5
+          done
       - name: Run Integration Tests
         env:
           BOOTSTRAP_MODE: runner
@@ -782,33 +793,14 @@ jobs:
         run: |
           set -euo pipefail
           docker push public.ecr.aws/e2u9m9o7/llm-provost:latest
-          docker push public.ecr.aws/e2u9m9o7/llm-provost:"${IMAGE_SHA_TAG}"
-      - name: Step 4b (Pin immutable digest in .env.versions)
-        if: env.IMAGE_CHANGED == 'true'
-        run: |
-          set -euo pipefail
-          REPOSITORY_NAME="${MCP_IMAGE##*/}"
-          ECR_DIGEST=""
-          for attempt in $(seq 1 12); do
-            ECR_DIGEST="$(aws ecr-public describe-images \
-              --region us-east-1 \
-              --repository-name "${REPOSITORY_NAME}" \
-              --image-ids imageTag="${IMAGE_SHA_TAG}" \
-              --query 'imageDetails[0].imageDigest' \
-              --output text 2>/dev/null || true)"
-            if echo "${ECR_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
-              break
-            fi
-            echo "Digest not yet available for ${REPOSITORY_NAME}:${IMAGE_SHA_TAG} (attempt ${attempt}/12)"
-            sleep 5
-          done
-
-          if ! echo "${ECR_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
-            echo "::error::Failed to resolve ECR digest for ${REPOSITORY_NAME}:${IMAGE_SHA_TAG}"
+          MCP_PUSH_OUTPUT="$(docker push public.ecr.aws/e2u9m9o7/llm-provost:"${IMAGE_SHA_TAG}" 2>&1)"
+          printf '%s\n' "${MCP_PUSH_OUTPUT}"
+          MCP_DIGEST="$(printf '%s\n' "${MCP_PUSH_OUTPUT}" | sed -n 's/.*digest: \(sha256:[a-f0-9]*\).*/\1/p' | tail -n 1)"
+          if ! echo "${MCP_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
+            echo "::error::Failed to capture MCP image digest from docker push output"
             exit 1
           fi
-
-          sed -i "s|^MCP_IMAGE_TAG=.*|MCP_IMAGE_TAG=${ECR_DIGEST}|" .env.versions
+          sed -i "s|^MCP_IMAGE_TAG=.*|MCP_IMAGE_TAG=${MCP_DIGEST}|" .env.versions
       - name: Step 4c (Commit pinned digest back to branch)
         if: env.IMAGE_CHANGED == 'true'
         continue-on-error: true
@@ -822,37 +814,24 @@ jobs:
           set -euo pipefail
           docker build \
             -t public.ecr.aws/e2u9m9o7/llm-provost:proxy-latest \
-            -t public.ecr.aws/e2u9m9o7/llm-provost:proxy-"${IMAGE_SHA_TAG}" .
+            -t "public.ecr.aws/e2u9m9o7/llm-provost:proxy-${IMAGE_SHA_TAG}" .
       - name: Step 4e (Push proxy image)
         if: env.IMAGE_CHANGED == 'true'
         run: |
           set -euo pipefail
           docker push public.ecr.aws/e2u9m9o7/llm-provost:proxy-latest
-          docker push public.ecr.aws/e2u9m9o7/llm-provost:proxy-"${IMAGE_SHA_TAG}"
+          docker push "public.ecr.aws/e2u9m9o7/llm-provost:proxy-${IMAGE_SHA_TAG}"
       - name: Step 4f (Pin proxy digest in .env.versions)
         if: env.IMAGE_CHANGED == 'true'
         run: |
           set -euo pipefail
-          PROXY_DIGEST=""
-          for attempt in $(seq 1 12); do
-            PROXY_DIGEST="$(aws ecr-public describe-images \
-              --region us-east-1 \
-              --repository-name llm-provost \
-              --image-ids imageTag="proxy-${IMAGE_SHA_TAG}" \
-              --query 'imageDetails[0].imageDigest' \
-              --output text 2>/dev/null || true)"
-            if echo "${PROXY_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
-              break
-            fi
-            echo "Digest not yet available for llm-provost:proxy-${IMAGE_SHA_TAG} (attempt ${attempt}/12)"
-            sleep 5
-          done
-
+          PROXY_PUSH_OUTPUT="$(docker push "public.ecr.aws/e2u9m9o7/llm-provost:proxy-${IMAGE_SHA_TAG}" 2>&1)"
+          printf '%s\n' "${PROXY_PUSH_OUTPUT}"
+          PROXY_DIGEST="$(printf '%s\n' "${PROXY_PUSH_OUTPUT}" | sed -n 's/.*digest: \(sha256:[a-f0-9]*\).*/\1/p' | tail -n 1)"
           if ! echo "${PROXY_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
-            echo "::error::Failed to resolve ECR digest for llm-provost:proxy-${IMAGE_SHA_TAG}"
+            echo "::error::Failed to capture proxy image digest from docker push output"
             exit 1
           fi
-
           sed -i "s|^OPENRESTY_IMAGE=.*|OPENRESTY_IMAGE=public.ecr.aws/e2u9m9o7/llm-provost@${PROXY_DIGEST}|" .env.versions
       - name: Step 4g (Commit pinned proxy digest back to branch)
         if: env.IMAGE_CHANGED == 'true'
@@ -868,38 +847,24 @@ jobs:
           docker build -f alpaca-mcp.Dockerfile \
             --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" \
             -t public.ecr.aws/e2u9m9o7/llm-provost:alpaca-mcp-latest \
-            -t public.ecr.aws/e2u9m9o7/llm-provost:alpaca-mcp-"${IMAGE_SHA_TAG}" .
+            -t "public.ecr.aws/e2u9m9o7/llm-provost:alpaca-mcp-${IMAGE_SHA_TAG}" .
       - name: Step 6 (Push alpaca-mcp)
         if: env.ALPACA_IMAGE_CHANGED == 'true'
         run: |
           set -euo pipefail
           docker push public.ecr.aws/e2u9m9o7/llm-provost:alpaca-mcp-latest
-          docker push public.ecr.aws/e2u9m9o7/llm-provost:alpaca-mcp-"${IMAGE_SHA_TAG}"
+          docker push "public.ecr.aws/e2u9m9o7/llm-provost:alpaca-mcp-${IMAGE_SHA_TAG}"
       - name: Step 7 (Pin immutable alpaca-mcp digest in .env.versions)
         if: env.ALPACA_IMAGE_CHANGED == 'true'
         run: |
           set -euo pipefail
-          REPOSITORY_NAME="${ALPACA_IMAGE##*/}"
-          ALPACA_DIGEST=""
-          for attempt in $(seq 1 12); do
-            ALPACA_DIGEST="$(aws ecr-public describe-images \
-              --region us-east-1 \
-              --repository-name "${REPOSITORY_NAME}" \
-              --image-ids imageTag="alpaca-mcp-${IMAGE_SHA_TAG}" \
-              --query 'imageDetails[0].imageDigest' \
-              --output text 2>/dev/null || true)"
-            if echo "${ALPACA_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
-              break
-            fi
-            echo "Digest not yet available for ${REPOSITORY_NAME}:alpaca-mcp-${IMAGE_SHA_TAG} (attempt ${attempt}/12)"
-            sleep 5
-          done
-
+          ALPACA_PUSH_OUTPUT="$(docker push "public.ecr.aws/e2u9m9o7/llm-provost:alpaca-mcp-${IMAGE_SHA_TAG}" 2>&1)"
+          printf '%s\n' "${ALPACA_PUSH_OUTPUT}"
+          ALPACA_DIGEST="$(printf '%s\n' "${ALPACA_PUSH_OUTPUT}" | sed -n 's/.*digest: \(sha256:[a-f0-9]*\).*/\1/p' | tail -n 1)"
           if ! echo "${ALPACA_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
-            echo "::error::Failed to resolve ECR digest for ${REPOSITORY_NAME}:alpaca-mcp-${IMAGE_SHA_TAG}"
+            echo "::error::Failed to capture Alpaca image digest from docker push output"
             exit 1
           fi
-
           sed -i "s|^ALPACA_IMAGE_TAG=.*|ALPACA_IMAGE_TAG=${ALPACA_DIGEST}|" .env.versions
       - name: Step 7b (Commit pinned alpaca-mcp digest back to branch)
         if: env.ALPACA_IMAGE_CHANGED == 'true'
