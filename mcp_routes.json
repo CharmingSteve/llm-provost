@@ -1,4 +1,4 @@
 {
-  "dummy": "http://mcp-server:8088",
-  "alpaca": "http://alpaca-mcp:8088"
+  "dummy": "http://mcp-server:8088/mcp",
+  "alpaca": "http://alpaca-mcp:8088/mcp"
 }

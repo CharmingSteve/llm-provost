@@ -30,7 +30,7 @@ setup() {
   grep -q "alpaca-mcp:" "$ROOT_DIR/docker-compose.yml"
   grep -q "ALPACA_IMAGE" "$ROOT_DIR/docker-compose.yml"
   grep -q "http://llm-provost:8081/trading" "$ROOT_DIR/docker-compose.yml"
-  grep -q '"alpaca"' "$ROOT_DIR/mcp_routes.json"
+  grep -q '"alpaca": "http://alpaca-mcp:8088/mcp"' "$ROOT_DIR/mcp_routes.json"
   grep -q "alpaca-mcp.Dockerfile" "$ROOT_DIR/docker-compose.override.yml"
   grep -q "ALPACA_IMAGE=" "$ROOT_DIR/.env.versions"
   [ -f "$ROOT_DIR/alpaca-mcp.Dockerfile" ]
@@ -41,7 +41,7 @@ setup() {
 
 @test "merge contract: LibreChat uses the governed Alpaca MCP route" {
   grep -q 'name: "alpaca"' "$ROOT_DIR/config/librechat.yaml" || grep -q '^  alpaca:' "$ROOT_DIR/config/librechat.yaml"
-  grep -q 'http://llm-provost:8000/mcp/alpaca' "$ROOT_DIR/config/librechat.yaml"
+  grep -q 'http://llm-provost:8000/mcp/alpaca/' "$ROOT_DIR/config/librechat.yaml"
   grep -q 'X-Provost-Token' "$ROOT_DIR/config/librechat.yaml"
   ! grep -q 'http://alpaca-mcp:8088' "$ROOT_DIR/config/librechat.yaml"
 }

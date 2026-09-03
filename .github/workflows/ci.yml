@@ -721,7 +721,7 @@ jobs:
           echo "Changed files:"
           printf '%s\n' "${changed_files}"
 
-          if printf '%s\n' "${changed_files}" | grep -Eq '^(mcp-server\.Dockerfile|hash-pip/requirements-runtime\.txt|\.env\.versions)$'; then
+          if printf '%s\n' "${changed_files}" | grep -Eq '^(Dockerfile|default\.conf|bootstrap\.sh|lua/.*|mcp_routes\.json|rules\.json|mcp-server\.Dockerfile|hash-pip/requirements-runtime\.txt|\.env\.versions|\.github/workflows/ci\.yml)$'; then
             echo "IMAGE_CHANGED=true" >> "$GITHUB_ENV"
             echo "Image-defining files changed; build/push enabled."
           else
@@ -815,6 +815,51 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "ci: pin MCP_IMAGE_TAG to ECR digest [skip ci]"
+          file_pattern: .env.versions
+      - name: Step 4d (Build proxy image)
+        if: env.IMAGE_CHANGED == 'true'
+        run: |
+          set -euo pipefail
+          docker build \
+            -t public.ecr.aws/e2u9m9o7/llm-provost:proxy-latest \
+            -t public.ecr.aws/e2u9m9o7/llm-provost:proxy-"${IMAGE_SHA_TAG}" .
+      - name: Step 4e (Push proxy image)
+        if: env.IMAGE_CHANGED == 'true'
+        run: |
+          set -euo pipefail
+          docker push public.ecr.aws/e2u9m9o7/llm-provost:proxy-latest
+          docker push public.ecr.aws/e2u9m9o7/llm-provost:proxy-"${IMAGE_SHA_TAG}"
+      - name: Step 4f (Pin proxy digest in .env.versions)
+        if: env.IMAGE_CHANGED == 'true'
+        run: |
+          set -euo pipefail
+          PROXY_DIGEST=""
+          for attempt in $(seq 1 12); do
+            PROXY_DIGEST="$(aws ecr-public describe-images \
+              --region us-east-1 \
+              --repository-name llm-provost \
+              --image-ids imageTag="proxy-${IMAGE_SHA_TAG}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text 2>/dev/null || true)"
+            if echo "${PROXY_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
+              break
+            fi
+            echo "Digest not yet available for llm-provost:proxy-${IMAGE_SHA_TAG} (attempt ${attempt}/12)"
+            sleep 5
+          done
+
+          if ! echo "${PROXY_DIGEST}" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
+            echo "::error::Failed to resolve ECR digest for llm-provost:proxy-${IMAGE_SHA_TAG}"
+            exit 1
+          fi
+
+          sed -i "s|^OPENRESTY_IMAGE=.*|OPENRESTY_IMAGE=public.ecr.aws/e2u9m9o7/llm-provost@${PROXY_DIGEST}|" .env.versions
+      - name: Step 4g (Commit pinned proxy digest back to branch)
+        if: env.IMAGE_CHANGED == 'true'
+        continue-on-error: true
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "ci: pin OPENRESTY_IMAGE to ECR digest [skip ci]"
           file_pattern: .env.versions
       - name: Step 5 (Build alpaca-mcp)
         if: env.ALPACA_IMAGE_CHANGED == 'true'
