@@ -8,8 +8,7 @@ FROM ${BASE_PYTHON_IMAGE}
 COPY hash-pip/requirements-alpaca.txt /tmp/requirements-alpaca.txt
 # the Alpaca Mcp Server is installed with pip, its page is https://pypi.org/project/alpaca-mcp-server/ and https://github.com/alpacahq/alpaca-mcp-server
 RUN apk upgrade --no-cache \
-	&& pip install --no-cache-dir --require-hashes --no-deps -r /tmp/requirements-alpaca.txt \
-	&& pip install --no-cache-dir "alpaca-mcp-server==2.1.0" \
+	&& pip install --no-cache-dir --require-hashes -r /tmp/requirements-alpaca.txt \
 	&& rm -f /tmp/requirements-alpaca.txt \
 	&& adduser -D -u 10001 -s /bin/sh appuser \
 	&& chown -R appuser:appuser /usr/local/lib/python3.11/site-packages
@@ -20,4 +19,3 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 	CMD python -c "import socket; s = socket.create_connection(('127.0.0.1', 8088), 3); s.close()" || exit 1
 
 # remove comment to trigger rebuild, or just add
-
