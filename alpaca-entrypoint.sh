@@ -75,4 +75,4 @@ echo "[entrypoint] Starting MCP Server with streamable-http transport..."
 # Because this exposes all container interfaces, enforce access controls via network policy/firewalls.
 # This entrypoint does not add network auth controls at bind time; rely on upstream proxy/platform controls.
 # Application-level authentication/authorization should also be enforced by the deployed stack.
-exec uv run --no-project alpaca-mcp-server --transport streamable-http --host 0.0.0.0 --port 8088
+exec alpaca-mcp-server --transport streamable-http --host 0.0.0.0 --port 8088
