@@ -300,8 +300,8 @@ jobs:
             echo "::warning::docker pull ${FLUENT_BIT_IMAGE} failed (attempt ${attempt}/5); retrying"
             sleep 5
           done
-          docker build -f mcp-server.Dockerfile --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" -t llm-provost-mcp-server:"${TRIVY_BUILD_TAG}" .
-          docker build -f alpaca-mcp.Dockerfile --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" -t llm-provost-alpaca-mcp:"${TRIVY_BUILD_TAG}" .
+          docker build --pull -f mcp-server.Dockerfile --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" -t llm-provost-mcp-server:"${TRIVY_BUILD_TAG}" .
+          docker build --pull -f alpaca-mcp.Dockerfile --build-arg BASE_PYTHON_IMAGE="${BASE_PYTHON_IMAGE}" -t llm-provost-alpaca-mcp:"${TRIVY_BUILD_TAG}" .
       - name: Trivy image scan (llm-provost)
         run: |
           set +e
