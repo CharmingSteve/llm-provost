@@ -5,6 +5,7 @@ setup() {
   export TEST_DIR="$(mktemp -d)"
   export PATH="$TEST_DIR/bin:$PATH"
   export PROVOST_LOG_FILE="$TEST_DIR/access.log"
+  export PROVOST_TOKEN="test-provost-token"
   mkdir -p "$TEST_DIR/bin"
 
   cat > "$TEST_DIR/bin/curl" <<'EOF'
