@@ -7,7 +7,7 @@ COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
 VERSIONS_FILE="$PROJECT_ROOT/.env.versions"
 
 usage() {
-	echo "Usage: $0 [--no-deps] {up|down|restart|logs|build|pull} [service ...]" >&2
+	echo "Usage: $0 [--no-deps] {up|down|restart|logs|build|pull|ps} [options|service ...]" >&2
 	exit 2
 }
 
@@ -25,7 +25,7 @@ mode="${1:-}"
 [ -n "$mode" ] || usage
 shift
 
-if [ "$#" -eq 0 ]; then
+if [ "$#" -eq 0 ] && [ "$mode" != "ps" ]; then
 	set -- llm-provost fluent-bit mcp-server api mongodb meilisearch
 fi
 
@@ -59,6 +59,9 @@ case "$mode" in
 		;;
 	pull)
 		compose pull "$@"
+		;;
+	ps)
+		compose ps "$@"
 		;;
 	*)
 		usage
