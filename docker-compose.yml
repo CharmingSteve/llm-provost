@@ -126,8 +126,10 @@ services:
       - /etc/localtime:/etc/localtime:ro
     environment:
       LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_ROUTES_JSON: ${LLM_ROUTES_JSON:-}
       AUDIT_LOG_MODE: ${AUDIT_LOG_MODE:-compact}
       MCP_ROUTING_TABLE_PATH: /etc/nginx/mcp_routes/mcp_routes.json
+      PROVOST_TOKEN: ${PROVOST_TOKEN:-}
       TZ: ${TZ:-Asia/Jerusalem}
     networks:
       - mcp_internal
@@ -198,6 +200,7 @@ services:
       MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-provost-dev-meili-key}"
       ENDPOINTS: "custom"
       MCP_ALLOWED_DOMAINS: "http://llm-provost:8000"
+      PROVOST_TOKEN: "${PROVOST_TOKEN:-}"
       ALLOW_SOCIAL_LOGIN: true
     volumes:
       - ./config/librechat.yaml:/app/librechat.yaml:ro

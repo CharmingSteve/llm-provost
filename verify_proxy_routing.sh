@@ -4,11 +4,23 @@ set -eu
 PROVOST_URL="${PROVOST_URL:-http://localhost:8000}"
 LOG_FILE="${PROVOST_LOG_FILE:-logs/fluent-bit-storage/access.log}"
 AUTH_MARKER="provost-auth-must-not-appear-$$"
+TOKEN_PATH="${PROVOST_SECRETS_DIR:-.secrets}/provost_token"
 CHAT_HEADERS=$(mktemp)
 CHAT_BODY=$(mktemp)
 MCP_HEADERS=$(mktemp)
 MCP_BODY=$(mktemp)
 trap 'rm -f "$CHAT_HEADERS" "$CHAT_BODY" "$MCP_HEADERS" "$MCP_BODY"' EXIT
+
+if [ -f "$TOKEN_PATH" ]; then
+    PROVOST_TOKEN=$(tr -d '\r\n' < "$TOKEN_PATH")
+else
+    PROVOST_TOKEN="${PROVOST_TOKEN:-}"
+fi
+if [ -z "$PROVOST_TOKEN" ]; then
+    fail_message="Provost token is not staged"
+    echo "FAIL: $fail_message" >&2
+    exit 1
+fi
 
 pass() {
     echo "PASS: $1"
@@ -24,6 +36,7 @@ request() {
     body_file="$2"
     url="$3"
     payload="$4"
+    authorization_value="${5:-$PROVOST_TOKEN}"
 
     curl --silent --show-error \
         --connect-timeout 5 \
@@ -34,14 +47,14 @@ request() {
         --header 'Content-Type: application/json' \
         --header 'X-Cognito-User: verify-user' \
         --header 'X-Conversation-Id: verify-conversation' \
-        --header "Authorization: Bearer $AUTH_MARKER" \
+        --header "Authorization: Bearer $authorization_value" \
         --request POST \
         --data "$payload" \
         "$url"
 }
 
 CHAT_PAYLOAD='{"model":"verification-model","messages":[{"role":"user","content":"routing check"}]}'
-chat_status=$(request "$CHAT_HEADERS" "$CHAT_BODY" "$PROVOST_URL/llm/openwire/v1/chat/completions" "$CHAT_PAYLOAD") || \
+chat_status=$(request "$CHAT_HEADERS" "$CHAT_BODY" "$PROVOST_URL/llm/openwire/v1/chat/completions" "$CHAT_PAYLOAD" "$AUTH_MARKER") || \
     fail "Path A request could not reach the proxy"
 
 case "$chat_status" in

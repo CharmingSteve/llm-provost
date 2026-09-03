@@ -26,7 +26,7 @@ mode="${1:-}"
 shift
 
 if [ "$#" -eq 0 ] && [ "$mode" != "ps" ]; then
-	set -- llm-provost fluent-bit mcp-server api mongodb meilisearch
+	set -- llm-provost fluent-bit mcp-server alpaca-mcp api mongodb meilisearch
 fi
 
 compose() {

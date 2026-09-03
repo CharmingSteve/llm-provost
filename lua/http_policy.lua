@@ -16,6 +16,54 @@ local function header(headers, name)
     return headers[name] or headers[name:lower()]
 end
 
+local function read_secret_file(path)
+    local file = io.open(path, "r")
+    if not file then
+        return nil
+    end
+    local value = file:read("*a")
+    file:close()
+    if type(value) ~= "string" then
+        return nil
+    end
+    value = value:gsub("[\r\n]+$", "")
+    return value ~= "" and value or nil
+end
+
+local function expected_provost_token()
+    local cached = ngx.shared.provost_secrets and ngx.shared.provost_secrets:get("token")
+    if cached and cached ~= "" then
+        return cached
+    end
+    local token = read_secret_file("/run/secrets/provost_token") or os.getenv("PROVOST_TOKEN")
+    if token and ngx.shared.provost_secrets then
+        ngx.shared.provost_secrets:set("token", token)
+    end
+    return token
+end
+
+local function valid_provost_token(headers)
+    local expected = expected_provost_token()
+    if not expected then
+        return false, "Provost token is not configured"
+    end
+
+    local provided = header(headers, "X-Provost-Token") or ngx.var.http_x_provost_token
+    if not provided or provided == "" then
+        local authorization = header(headers, "Authorization") or ngx.var.http_authorization
+        if type(authorization) == "string" then
+            provided = authorization:match("^[Bb][Ee][Aa][Rr][Ee][Rr]%s+(.+)$")
+        end
+    end
+    if type(provided) == "string" then
+        provided = provided:gsub("[\r\n]+$", "")
+    end
+    if provided ~= expected then
+        return false, "Invalid Provost token"
+    end
+    return true
+end
+
 local function decode_jwt_user(auth_header)
     if type(auth_header) ~= "string" then
         return nil
@@ -120,6 +168,13 @@ end
 local headers = ngx.req.get_headers()
 local uri = ngx.var.uri or ""
 local is_mcp_path = uri:match("^/mcp/") ~= nil
+
+if is_mcp_path then
+    local authenticated, auth_error = valid_provost_token(headers)
+    if not authenticated then
+        return reject_route(auth_error, ngx.HTTP_UNAUTHORIZED, "PROVOST_TOKEN_INVALID")
+    end
+end
 
 local user_id = header(headers, "X-Cognito-User")
 if type(user_id) ~= "string" or user_id == "" then
