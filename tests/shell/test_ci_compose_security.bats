@@ -39,6 +39,8 @@
   [ "$status" -ne 0 ]
   run grep -F 'baseURL: "http://llm-provost:8000/llm/openwire/v1"' config/librechat.yaml
   [ "$status" -eq 0 ]
+  run grep -E '^\s*OLLAMA_API_KEY:\s*"\$\{OLLAMA_API_KEY:-\}"' docker-compose.yml
+  [ "$status" -eq 0 ]
 }
 
 @test "local proxy mounts current bootstrap environment loader" {
