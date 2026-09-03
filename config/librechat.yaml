@@ -41,6 +41,11 @@ interface:
     share: false
     public: false
 
+mcpSettings:
+  allowedDomains:
+    - "http://llm-provost:8000"
+    - "https://mcp.atlassian.com"
+
 mcpServers:
   atlassian:
     type: sse
@@ -48,7 +53,7 @@ mcpServers:
 
   alpaca:
     type: streamable-http
-    url: http://llm-provost:8000/mcp/alpaca
+    url: http://llm-provost:8000/mcp/alpaca/
     headers:
       X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
       X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"

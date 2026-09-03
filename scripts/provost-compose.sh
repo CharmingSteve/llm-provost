@@ -11,8 +11,14 @@ usage() {
 	exit 2
 }
 
-if [ ! -f "$PROJECT_ROOT/.env" ]; then
-	echo "WARN: $PROJECT_ROOT/.env is missing; secret-backed services may not start" >&2
+cd "$PROJECT_ROOT"
+
+# Docker Compose parses .env as a dotenv file; do not source it as shell code.
+# CI and production provide values through their environment or bootstrap.
+if [ -f "$PROJECT_ROOT/.env" ]; then
+	:
+else
+	echo "WARN: $PROJECT_ROOT/.env is missing; using environment values" >&2
 fi
 
 no_deps=false
@@ -30,6 +36,11 @@ if [ "$#" -eq 0 ] && [ "$mode" != "ps" ]; then
 fi
 
 compose() {
+	if [ -f "$PROJECT_ROOT/.env" ]; then
+		docker compose --env-file "$VERSIONS_FILE" --env-file "$PROJECT_ROOT/.env" -f "$COMPOSE_FILE" "$@"
+		return
+	fi
+
 	docker compose --env-file "$VERSIONS_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
