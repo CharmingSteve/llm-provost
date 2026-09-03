@@ -39,6 +39,13 @@ setup() {
   grep -q -- "--require-hashes" "$ROOT_DIR/alpaca-mcp.Dockerfile"
 }
 
+@test "merge contract: LibreChat uses the governed Alpaca MCP route" {
+  grep -q 'name: "alpaca"' "$ROOT_DIR/config/librechat.yaml" || grep -q '^  alpaca:' "$ROOT_DIR/config/librechat.yaml"
+  grep -q 'http://llm-provost:8000/mcp/alpaca' "$ROOT_DIR/config/librechat.yaml"
+  grep -q 'X-Provost-Token' "$ROOT_DIR/config/librechat.yaml"
+  ! grep -q 'http://alpaca-mcp:8088' "$ROOT_DIR/config/librechat.yaml"
+}
+
 @test "merge contract: outbound MCP-to-API ledger present in default.conf" {
   grep -q "listen 8081;" "$ROOT_DIR/default.conf"
   grep -q "tag=provost_mcp_to_api_access" "$ROOT_DIR/default.conf"

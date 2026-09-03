@@ -197,6 +197,7 @@ jobs:
         run: |
           set -euo pipefail
           docker build -t llm-provost:test .
+          echo "OPENRESTY_IMAGE=llm-provost:test" >> "$GITHUB_ENV"
       - name: Validate docker compose config
         run: |
           set -euo pipefail
@@ -519,6 +520,11 @@ jobs:
         run: |
           mkdir -p logs/fluent-bit-storage/final
           chmod -R a+rwx logs/fluent-bit-storage
+      - name: Build proxy image for integration runtime
+        run: |
+          set -euo pipefail
+          docker build -t llm-provost:test .
+          echo "OPENRESTY_IMAGE=llm-provost:test" >> "$GITHUB_ENV"
       - name: Bring up compose stack
         run: |
           set -euo pipefail

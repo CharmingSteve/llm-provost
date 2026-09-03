@@ -35,6 +35,33 @@ write_secret_file() {
   chmod 600 "$path"
 }
 
+create_runtime_dirs() {
+  mode="$1"
+  if [ "$mode" = "ec2" ]; then
+    PROVOST_SECRETS_DIR="/run/provost-secrets"
+    PROVOST_RUN_DIR="/run/provost"
+    mkdir -p "$PROVOST_SECRETS_DIR" "$PROVOST_RUN_DIR"
+  else
+    if [ -z "${PROVOST_SECRETS_DIR:-}" ] || [ ! -d "$PROVOST_SECRETS_DIR" ]; then
+      PROVOST_SECRETS_DIR=$(mktemp -d)
+    fi
+    if [ -z "${PROVOST_RUN_DIR:-}" ] || [ ! -d "$PROVOST_RUN_DIR" ]; then
+      PROVOST_RUN_DIR=$(mktemp -d)
+    fi
+  fi
+  chmod 700 "$PROVOST_SECRETS_DIR"
+  chmod 700 "$PROVOST_RUN_DIR"
+}
+
+stage_runtime_secrets() {
+  mode="$1"
+  create_runtime_dirs "$mode"
+  write_secret_file "${ALPACA_API_KEY:-dummy}" "$PROVOST_SECRETS_DIR/alpaca_api_key"
+  write_secret_file "${ALPACA_SECRET_KEY:-dummy}" "$PROVOST_SECRETS_DIR/alpaca_secret_key"
+  write_secret_file "${ALPACA_PAPER_TRADE:-true}" "$PROVOST_SECRETS_DIR/alpaca_paper_trade"
+  write_secret_file "${PROVOST_TOKEN:-dummy-provost-token}" "$PROVOST_SECRETS_DIR/provost_token"
+}
+
 # Stage the Alpaca MCP server's file-based secrets (mounted at /run/secrets)
 # so alpaca-mcp can start and the forbidden-endpoint integration test can
 # authenticate against the outbound ledger.
@@ -59,7 +86,7 @@ load_env_file() {
     return
   fi
 
-  for key in $SECRET_KEYS AWS_REGION S3_BUCKET LLM_ROUTES_JSON; do
+  for key in $SECRET_KEYS AWS_REGION S3_BUCKET LLM_ROUTES_JSON PROVOST_TOKEN ALPACA_API_KEY ALPACA_SECRET_KEY ALPACA_PAPER_TRADE; do
     value=$(env_get "$key" "$ENV_FILE" || true)
     if [ -n "$value" ]; then
       export "$key=$value"
@@ -81,7 +108,7 @@ load_secrets_manager() {
     --query SecretString \
     --output text)
 
-  for key in $SECRET_KEYS; do
+  for key in $SECRET_KEYS PROVOST_TOKEN ALPACA_API_KEY ALPACA_SECRET_KEY ALPACA_PAPER_TRADE; do
     value=$(printf '%s' "$secret_json" | json_get "$key")
     if [ -n "$value" ]; then
       export "$key=$value"
@@ -95,7 +122,7 @@ load_secrets_manager() {
 }
 
 emit_environment() {
-  for key in $SECRET_KEYS AWS_REGION S3_BUCKET LLM_ROUTES_JSON; do
+  for key in $SECRET_KEYS AWS_REGION S3_BUCKET LLM_ROUTES_JSON PROVOST_TOKEN ALPACA_API_KEY ALPACA_SECRET_KEY ALPACA_PAPER_TRADE; do
     eval "value=\${$key:-}"
     emit_export_or_unset "$key" "$value"
   done
@@ -105,19 +132,27 @@ case "$MODE" in
   dev)
     create_default_routes
     load_env_file
+    stage_runtime_secrets dev
+    echo "export PROVOST_SECRETS_DIR='$PROVOST_SECRETS_DIR'"
+    echo "export PROVOST_RUN_DIR='$PROVOST_RUN_DIR'"
     emit_environment
+    echo "trap \"rm -rf '$PROVOST_SECRETS_DIR' '$PROVOST_RUN_DIR'\" EXIT"
     ;;
   runner)
     create_default_routes
-    stage_alpaca_secrets
+    stage_runtime_secrets runner
     emit_environment
     echo "export PROVOST_SECRETS_DIR='$PROVOST_SECRETS_DIR'"
+    echo "export PROVOST_RUN_DIR='$PROVOST_RUN_DIR'"
     ;;
   ec2)
     create_default_routes
     load_env_file
     load_secrets_manager
+    stage_runtime_secrets ec2
     emit_environment
+    echo "export PROVOST_SECRETS_DIR='$PROVOST_SECRETS_DIR'"
+    echo "export PROVOST_RUN_DIR='$PROVOST_RUN_DIR'"
     ;;
   container)
     load_env_file

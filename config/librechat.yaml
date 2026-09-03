@@ -46,6 +46,14 @@ mcpServers:
     type: sse
     url: https://mcp.atlassian.com/v1/sse
 
+  alpaca:
+    type: streamable-http
+    url: http://llm-provost:8000/mcp/alpaca
+    headers:
+      X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
+      X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+      X-Provost-Token: "${PROVOST_TOKEN}"
+
 
     #  dummy:
 #    type: streamable-http
