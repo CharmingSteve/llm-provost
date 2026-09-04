@@ -85,10 +85,15 @@
   "mcp_servers": {
     "alpaca": {
       "tool_allowlist": {
-        "enabled": false,
-        "description": "Optional per-server allowlist. Disabled: Alpaca tools are governed by the trading rules below, matching Agent Provost behavior.",
+        "enabled": true,
+        "description": "Allow only read-only Alpaca portfolio tools. Trading safety limits remain enforced below.",
         "params": {
-          "tools": []
+          "tools": [
+            "get_account_info",
+            "get_all_positions",
+            "get_open_position",
+            "get_portfolio_history"
+          ]
         }
       },
       "share_limits": {

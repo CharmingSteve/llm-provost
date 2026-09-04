@@ -167,6 +167,39 @@ Streaming records are sent over the internal Compose network to Fluent Bit and i
 
 Set `AUDIT_LOG_MODE=raw` in the deployment environment and restart the Compose stack to retain SSE wire data in ordered bounded records for diagnostics. Raw mode is intentionally deployment-scoped and cannot be enabled with a client request header. Local enriched JSON Lines records are written to `logs/fluent-bit-storage/access.log` and `logs/fluent-bit-storage/error.log`.
 
+### Viewing Local Logs
+
+Run these commands from the repository root. The S3 outputs receive only the `provost.access` and `provost.error` audit streams.
+
+Follow Fluent Bit's audit-log delivery output:
+
+```sh
+./scripts/provost-compose.sh logs --tail 100 fluent-bit
+```
+
+The wrapper follows the stream; stop it with `Ctrl+C`.
+
+Follow the durable local audit files. These files do not depend on S3 delivery:
+
+```sh
+tail --lines 100 --follow \
+  logs/fluent-bit-storage/access.log \
+  logs/fluent-bit-storage/error.log
+```
+
+Show recent access audit records:
+
+```sh
+grep -aE 'request":"(POST /llm|GET /llm|POST /mcp|GET /trading|GET /broker|GET /data)' \
+  logs/fluent-bit-storage/access.log | tail -n 50
+```
+
+Show recent error audit records:
+
+```sh
+tail --lines 100 logs/fluent-bit-storage/error.log
+```
+
 Key operational intent:
 
 - keep policy enforcement and logs inside your cloud account
