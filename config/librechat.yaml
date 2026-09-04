@@ -53,6 +53,7 @@ mcpServers:
 
   alpaca:
     type: streamable-http
+    requiresOAuth: false
     url: http://llm-provost:8000/mcp/alpaca/
     headers:
       X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
