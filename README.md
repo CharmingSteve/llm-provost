@@ -34,17 +34,32 @@ Correlation fields used across hops:
 - provost_machine
 - provost_request_id
 
-## Seven Core Controls
+## Core Controls
 
-The current implementation and policy model center around these seven controls:
+The current implementation and policy model include:
 
 1. Programmable governance guardrails (allow/block tool calls)
 2. Per-tool rate limiting
 3. Token caps for tool requests
 4. Time-based access controls
 5. Identity-rich audit logging
-6. Hot-reload rules from rules.json (10-second mtime polling)
-7. Containerized deployment for repeatable operations
+6. LLM chat governance on non-MCP paths (`llm_rules`: PII filtering + token caps)
+7. Per-MCP-server policy dispatch (`mcp_servers.<server>`)
+8. Alpaca trading controls imported from Agent Provost (size/notional limits, symbol controls, forbidden endpoints, order replacement/close protections, optional trading window)
+9. Four-layer identity restoration on the outbound MCP-to-API boundary
+10. Hot-reload rules from rules.json (10-second mtime polling)
+11. Containerized deployment for repeatable operations
+
+## Agent Provost Features Imported
+
+This branch includes Agent Provost imports for governed Alpaca MCP usage:
+
+- Dedicated `alpaca-mcp` service routed through LLM Provost (`/mcp/alpaca`).
+- Outbound MCP-to-API governance boundary on port `8081` for trading/data/broker API calls.
+- Deterministic trading rule engine (`lua/trading_rules.lua`) wired through `rules_engine.lua` per-server dispatch.
+- Agent Provost rule aliases supported in policy (for example `max_notional -> max_trade_notional`, `symbol_allowlist -> allowed_tickers`, `forbidden_endpoints -> forbidden_tools`).
+- Runtime outbound identity context restoration (`lua/outbound_identity.lua`) so audit logs preserve provost identity even when upstream headers are dropped.
+- Alpaca startup behavior aligned with Agent Provost entrypoint/runtime expectations.
 
 ## Architecture
 
@@ -146,6 +161,22 @@ The schema currently includes:
 - token_caps
 - time_based_rules
 - logging_rules
+- llm_rules
+- mcp_servers (per-server overrides and deterministic rules, including `alpaca`)
+
+The `mcp_servers.alpaca` policy block supports imported Agent Provost controls including:
+
+- share quantity limit (`max_trade_size`/`share_limits`)
+- single-order notional cap (`max_trade_notional`/`max_notional`)
+- rolling cumulative notional cap (`cumulative_trade_notional`)
+- per-symbol order cooldown (`symbol_order_cooldown`)
+- symbol blocklist and draconian allowlist (`blocked_tickers`/`symbol_blocklist`, `allowed_tickers`/`symbol_allowlist`)
+- allowed asset classes (`allowed_asset_classes`)
+- restricted ticker-by-tool enforcement (`restricted_ticker_tool_rules`)
+- forbidden outbound endpoint templates (`forbidden_tools`/`forbidden_endpoints`)
+- replacement order protections (`max_replace_notional`, `prevent_market_order_upgrade`)
+- close-position protections (`max_close_notional`, `allowed_close_tickers`)
+- optional UTC trading window (`trading_window`)
 
 Policy reload behavior:
 
