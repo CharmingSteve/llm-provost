@@ -20,6 +20,7 @@ endpoints:
         X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
       model_parameters:
         maxContextTokens: 128000
+      maxContextTokens: 128000
       models:
         default:
           - "gpt-5-mini"
