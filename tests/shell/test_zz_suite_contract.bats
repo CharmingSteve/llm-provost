@@ -43,6 +43,7 @@ setup() {
   grep -q 'name: "alpaca"' "$ROOT_DIR/config/librechat.yaml" || grep -q '^  alpaca:' "$ROOT_DIR/config/librechat.yaml"
   grep -q 'http://llm-provost:8000/mcp/alpaca/' "$ROOT_DIR/config/librechat.yaml"
   grep -q 'X-Provost-Token' "$ROOT_DIR/config/librechat.yaml"
+  grep -q 'requiresOAuth: false' "$ROOT_DIR/config/librechat.yaml"
   ! grep -q 'http://alpaca-mcp:8088' "$ROOT_DIR/config/librechat.yaml"
 }
 
