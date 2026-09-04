@@ -14,13 +14,26 @@ endpoints:
   custom:
     - name: "OpenWire"
       apiKey: "${OPENAI_API_KEY}"
-      baseURL: "http://llm-provost:8000/v1"
+      baseURL: "http://llm-provost:8000/llm/openwire/v1"
       headers:
         X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+        X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
       models:
         default:
-          - "gpt-5-mini" # You can set a default, but fetch: true will grab the rest
+          - "gpt-5-mini"
         fetch: true
+
+    - name: "Ollama"
+      apiKey: "${OLLAMA_API_KEY}"
+      baseURL: "http://llm-provost:8000/llm/ollama/v1"
+      headers:
+        X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+        X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
+      models:
+        default:
+          - "llama3.1:8b"
+        fetch: true
+    
 interface:
   mcpServers:
     use: true
@@ -28,10 +41,31 @@ interface:
     share: false
     public: false
 
+mcpSettings:
+  allowedDomains:
+    - "http://llm-provost:8000"
+    - "https://mcp.atlassian.com"
+
 mcpServers:
-  dummy:
+  atlassian:
+    type: sse
+    url: https://mcp.atlassian.com/v1/sse
+
+  alpaca:
     type: streamable-http
-    url: http://llm-provost:8000/mcp/dummy
+    requiresOAuth: false
+    url: http://llm-provost:8000/mcp/alpaca/
     headers:
       X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
       X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+      X-Provost-Token: "${PROVOST_TOKEN}"
+
+
+    #  dummy:
+#    type: streamable-http
+#    url: http://llm-provost:8000/mcp/dummy
+#    headers:
+#      X-Cognito-User: "{{LIBRECHAT_USER_EMAIL}}"
+#      X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+
+  

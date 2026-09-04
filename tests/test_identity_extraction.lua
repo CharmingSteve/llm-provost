@@ -1,3 +1,5 @@
+package.path = package.path .. ";lua/?.lua"
+
 local cjson = require("cjson.safe")
 
 local function run_policy(options)
@@ -33,17 +35,23 @@ local function run_policy(options)
     end
 
     local headers = options.headers or {}
+    headers["X-Provost-Token"] = headers["X-Provost-Token"] or "test-provost-token"
     local body = options.body or ""
     ngx = {
         ctx = {},
         var = {
             uri = options.uri,
+            backend_name = options.backend_name or "openwire",
             request_id = options.request_id or "generated-request-id",
             provost_req_id = "",
             provost_user_id = "steve",
             provost_customer_id = "craig",
             provost_conversation_id = "none",
+            llm_target_url = "",
+            req_body = "",
+            resp_body = "",
         },
+        header = {},
         req = {
             get_headers = function()
                 return headers
@@ -74,9 +82,32 @@ local function run_policy(options)
         decode_base64 = function()
             return options.jwt_claims or "{}"
         end,
+        say = function(response_body)
+            ngx.response_body = response_body
+        end,
+        exit = function(status)
+            ngx.exit_status = status
+            return status
+        end,
+        HTTP_FORBIDDEN = 403,
+        HTTP_NOT_FOUND = 404,
+        HTTP_INTERNAL_SERVER_ERROR = 500,
+        HTTP_UNAUTHORIZED = 401,
     }
 
-    local policy_environment = setmetatable({ngx = ngx}, {__index = _G})
+    local policy_os = setmetatable({
+        getenv = function(name)
+            if name == "LLM_ROUTES_JSON" then
+                return options.routes_json
+                    or '{"openwire":"http://openwire:3030/v1","ollama":"http://ollama:11434/v1"}'
+            end
+            if name == "PROVOST_TOKEN" then
+                return "test-provost-token"
+            end
+            return os.getenv(name)
+        end,
+    }, {__index = os})
+    local policy_environment = setmetatable({ngx = ngx, os = policy_os}, {__index = _G})
     local policy
     if setfenv then
         policy = assert(loadfile("lua/http_policy.lua"))
@@ -97,7 +128,7 @@ end
 describe("four-layer identity extraction", function()
     it("extracts chat identity from a Cognito JWT", function()
         local result = run_policy({
-            uri = "/v1/chat/completions",
+            uri = "/llm/openwire/v1/chat/completions",
             headers = {Authorization = "Bearer header.payload.signature"},
             jwt_claims = '{"sub":"chat-user"}',
         })
@@ -107,8 +138,16 @@ describe("four-layer identity extraction", function()
         assert.equals("none", result.var.provost_conversation_id)
     end)
 
+    it("extracts chat identity from LibreChat's authenticated user header", function()
+        local result = run_policy({
+            uri = "/llm/openwire/v1/chat/completions",
+            headers = {['X-Cognito-User'] = "user@example.com"},
+        })
+        assert.equals("user@example.com", result.var.provost_user_id)
+    end)
+
     it("defaults a chat user when no JWT is present", function()
-        local result = run_policy({uri = "/v1/chat/completions"})
+        local result = run_policy({uri = "/llm/openwire/v1/chat/completions"})
         assert.equals("steve", result.var.provost_user_id)
     end)
 
@@ -151,7 +190,7 @@ describe("four-layer identity extraction", function()
     end)
 
     it("extracts conversation identity on chat and MCP paths", function()
-        for _, uri in ipairs({"/v1/chat/completions", "/mcp/trading"}) do
+        for _, uri in ipairs({"/llm/openwire/v1/chat/completions", "/mcp/trading"}) do
             local result = run_policy({
                 uri = uri,
                 headers = {["X-Conversation-Id"] = "conversation-7"},
@@ -161,7 +200,7 @@ describe("four-layer identity extraction", function()
     end)
 
     it("defaults conversation identity on chat and MCP paths", function()
-        for _, uri in ipairs({"/v1/chat/completions", "/mcp/trading"}) do
+        for _, uri in ipairs({"/llm/openwire/v1/chat/completions", "/mcp/trading"}) do
             local result = run_policy({uri = uri})
             assert.equals("none", result.var.provost_conversation_id)
         end
@@ -169,10 +208,40 @@ describe("four-layer identity extraction", function()
 
     it("stores the request body for access and error logs", function()
         local result = run_policy({
-            uri = "/v1/chat/completions",
+            uri = "/llm/openwire/v1/chat/completions",
             body = '{"message":"hello"}',
         })
         assert.equals('{"message":"hello"}', result.var.req_body)
+    end)
+
+    it("builds an upstream URL from the named backend and request suffix", function()
+        local result = run_policy({uri = "/llm/ollama/v1/chat/completions", backend_name = "ollama"})
+        assert.equals("http://ollama:11434/v1/chat/completions", result.var.llm_target_url)
+        assert.is_nil(result.exit_status)
+    end)
+
+    it("returns 404 for an unknown LLM backend", function()
+        local result = run_policy({uri = "/llm/unknown/v1/models", backend_name = "unknown"})
+        assert.equals(404, result.exit_status)
+        assert.matches('"error":"Unknown LLM backend: unknown"', result.response_body, 1, true)
+    end)
+
+    it("returns 500 when the LLM routing JSON is malformed", function()
+        local result = run_policy({
+            uri = "/llm/openwire/v1/models",
+            routes_json = "not-json",
+        })
+        assert.equals(500, result.exit_status)
+        assert.matches('"error":"LLM backend routing is not configured"', result.response_body, 1, true)
+    end)
+
+    it("returns 500 when an LLM backend URL contains credentials", function()
+        local result = run_policy({
+            uri = "/llm/openwire/v1/models",
+            routes_json = '{"openwire":"https://user:password@example.com/v1"}',
+        })
+        assert.equals(500, result.exit_status)
+        assert.matches('"error":"LLM backend routing is not configured"', result.response_body, 1, true)
     end)
 
     it("reads file-backed request bodies without bypassing identity extraction", function()
@@ -197,7 +266,11 @@ describe("four-layer identity extraction", function()
         })
         os.remove(body_file)
 
-        assert.equals(body, result.var.req_body)
+        local audit_body = assert(cjson.decode(result.var.req_body))
+        assert.equals("tools/call", audit_body.method)
+        assert.equals("get_records", audit_body.params.name)
+        assert.equals("file-backed-customer", audit_body.params.arguments.customer_id)
+        assert.is_true(audit_body.truncated)
         assert.equals(body, result.ctx.request_body)
         assert.equals("file-backed-customer", result.var.provost_customer_id)
         assert.equals("http://mcp-server:8088", result.ctx.mcp_destination)

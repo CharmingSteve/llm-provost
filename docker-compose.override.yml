@@ -5,7 +5,15 @@ services:
       dockerfile: mcp-server.Dockerfile
     image: llm-provost-mcp:local
 
+  alpaca-mcp:
+    build:
+      context: .
+      dockerfile: alpaca-mcp.Dockerfile
+    image: llm-provost-alpaca-mcp:local
+
   llm-provost:
     image: llm-provost:local
+    volumes:
+      - ./bootstrap.sh:/usr/local/bin/bootstrap.sh:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"

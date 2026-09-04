@@ -98,8 +98,42 @@ Any client that can call an OpenAI-compatible endpoint and/or MCP endpoint throu
 
 In this repository, example integration is shown in [config/librechat.yaml](config/librechat.yaml) where:
 
-- OpenWire-style endpoint traffic is routed through http://llm-provost:8000/v1
+- OpenWire traffic is routed through http://llm-provost:8000/llm/openwire/v1
+- Ollama traffic is routed through http://llm-provost:8000/llm/ollama/v1
 - MCP tool traffic is routed through /mcp/<server>
+
+### Multiple LLM Backends
+
+Define every allowed LLM backend in `.env` as one JSON object. Backend names become the first path segment after `/llm/`, and each value is the upstream API base URL:
+
+```sh
+LLM_ROUTES_JSON={"openwire":"http://host.docker.internal:3030/v1","ollama":"http://xps:11434/v1","bedrock":"https://bedrock-runtime.us-east-1.amazonaws.com"}
+```
+
+A client configured with `http://llm-provost:8000/llm/openwire/v1` therefore sends chat completions to the `openwire` URL. Add another backend by adding a unique lowercase name and an HTTP or HTTPS URL to the JSON object, then restart the proxy so OpenResty reloads its environment. Unknown backend names return HTTP 404; missing, malformed, or invalid routing configuration fails closed with HTTP 500. There is no single-backend fallback.
+
+Keep credentials in their existing environment variables, such as `OPENAI_API_KEY` and `OLLAMA_API_KEY`; do not put credentials in backend URLs. LLM requests continue through the same policy, Cognito identity extraction, four-layer ID logging, request/response audit capture, and authorization forwarding used by the original route. MCP routing remains configured separately in `mcp_routes.json`.
+
+### Routing Tests
+
+Run the focused routing checks from the repository root:
+
+```sh
+busted tests/lua/proxy_headers_spec.lua tests/lua/circuit_breaker_spec.lua
+bats tests/shell/test_entrypoint.bats tests/shell/test_verify_proxy_routing.bats
+```
+
+For a running stack, `sh verify_proxy_routing.sh` probes `/llm/openwire/v1/chat/completions` and `/mcp/dummy`, verifies the four identity layers, and checks that the bearer token is absent from logs.
+
+### LibreChat + Cognito Identity
+
+When LibreChat is used with Cognito, the recommended setup is:
+
+- request the `openid profile email phone` scope set in Cognito
+- map LibreChat's display name to `given_name` so the greeting uses the user's first name
+- forward LibreChat's authenticated user ID to the proxy as `X-Cognito-User`
+
+The local stack keeps the LibreChat OpenID settings in the mounted `.env` file so a rebuild does not wipe out Cognito login. The compose file no longer duplicates those OpenID variables at service level.
 
 ## Governance Policy Model
 
@@ -124,7 +158,14 @@ See [RULES_ENGINE.md](RULES_ENGINE.md) for full rule documentation.
 ## Logging and Sovereignty
 
 LLM Provost emits structured JSON logs with request and response body capture for governed paths.
+The proxy resolves `user_id` from `X-Cognito-User` when LibreChat forwards an authenticated user email, and falls back to the Cognito JWT `sub` or email claim when needed.
 In the default stack, Fluent Bit ships logs to local files and optional S3 outputs.
+
+Audit bodies use compact mode by default. JSON is minified, model lists are summarized with their count and model IDs, and recognized OpenAI-compatible, Ollama, Anthropic, Responses API, and Gemini SSE streams are reconstructed into ordered semantic records. Each response record contains at most 8 KiB of semantic text and a monotonic `chunk` index; the final record sets `complete:true`. There is no total response or record-count limit, so content, reasoning, and tool-call arguments in the middle of million-word responses remain auditable without buffering the full response in proxy memory. Malformed or oversized SSE events are preserved as bounded `unparsed_sse_payload` or `unparsed_sse_fragment` records rather than discarded.
+
+Streaming records are sent over the internal Compose network to Fluent Bit and independently mirrored to the proxy's standard output. If the bounded transport-outage queue fills, response processing fails closed instead of silently passing unaudited content. Interrupted streams retain their partial semantic records and produce a structured error record for client aborts, upstream failures, or post-header interruptions. Empty request bodies remain empty, credential-like request fields are recursively replaced with `[REDACTED]`, and repeated LibreChat conversation histories are summarized to keep request records useful.
+
+Set `AUDIT_LOG_MODE=raw` in the deployment environment and restart the Compose stack to retain SSE wire data in ordered bounded records for diagnostics. Raw mode is intentionally deployment-scoped and cannot be enabled with a client request header. Local enriched JSON Lines records are written to `logs/fluent-bit-storage/access.log` and `logs/fluent-bit-storage/error.log`.
 
 Key operational intent:
 

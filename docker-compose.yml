@@ -25,6 +25,40 @@ services:
     pids_limit: 256
     restart: unless-stopped
 
+  alpaca-mcp:
+    # Alpaca MCP server (ported from Agent Provost). Its REST calls are routed
+    # back through llm-provost:8081 so the outbound hop is governed and audited.
+    # Digest is sourced from .env.versions via: docker compose --env-file .env.versions.
+    # It is built from the alpaca-mcp.Dockerfile in the root of this repo.
+    image: ${ALPACA_IMAGE}@${ALPACA_IMAGE_TAG}
+    pull_policy: if_not_present
+    container_name: alpaca-mcp
+    volumes:
+      - ./alpaca-entrypoint.sh:/entrypoint.sh:ro
+      - ${PROVOST_SECRETS_DIR:-./.secrets}:/run/secrets:ro
+      - /etc/localtime:/etc/localtime:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      TRADE_API_URL: "http://llm-provost:8081/trading"
+      DATA_API_URL: "http://llm-provost:8081/data"
+      BROKER_API_URL: "http://llm-provost:8081/broker"
+      ALPACA_API_KEY: ${ALPACA_API_KEY:-}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
+      TZ: ${TZ:-Asia/Jerusalem}
+    expose:
+      - "8088"
+    networks:
+      - mcp_internal
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    pids_limit: 256
+    restart: unless-stopped
+
   fluent-bit:
     image: ${FLUENT_BIT_IMAGE}
     pull_policy: if_not_present
@@ -73,6 +107,8 @@ services:
     depends_on:
       mcp-server:
         condition: service_started
+      alpaca-mcp:
+        condition: service_started
       fluent-bit:
         condition: service_healthy
     ports:
@@ -81,7 +117,7 @@ services:
       - "8081"
     volumes:
       - ./.env:/app/.env:ro
-      - ./default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./default.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./lua:/etc/nginx/lua:ro
       - ./rules.json:/etc/nginx/rules.json:ro
       - ./mcp_routes.json:/etc/nginx/mcp_routes/mcp_routes.json:ro
@@ -90,7 +126,10 @@ services:
       - /etc/localtime:/etc/localtime:ro
     environment:
       LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_ROUTES_JSON: ${LLM_ROUTES_JSON:-}
+      AUDIT_LOG_MODE: ${AUDIT_LOG_MODE:-compact}
       MCP_ROUTING_TABLE_PATH: /etc/nginx/mcp_routes/mcp_routes.json
+      PROVOST_TOKEN: ${PROVOST_TOKEN:-}
       TZ: ${TZ:-Asia/Jerusalem}
     networks:
       - mcp_internal
@@ -160,15 +199,9 @@ services:
       MEILI_HOST: "http://meilisearch:7700"
       MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-provost-dev-meili-key}"
       ENDPOINTS: "custom"
-      OPENID_CLIENT_ID: "${OPENID_CLIENT_ID:-}"
-      OPENID_CLIENT_SECRET: "${OPENID_CLIENT_SECRET:-}"
-      OPENID_ISSUER: "${OPENID_ISSUER:-}"
-      OPENID_CALLBACK_URL: "${OPENID_CALLBACK_URL:-/oauth/openid/callback}"
-      OPENID_SESSION_SECRET: "${OPENID_SESSION_SECRET:-change-this-to-a-random-string}"
-      OPENID_SCOPE: "openid profile email"
-      #OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
-      OPENAI_REVERSE_PROXY: "${OPENAI_REVERSE_PROXY:-}"
-      MCP_ALLOWED_DOMAINS: "http://llm-provost:8000"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OLLAMA_API_KEY: "${OLLAMA_API_KEY:-}"
+      PROVOST_TOKEN: "${PROVOST_TOKEN:-}"
       ALLOW_SOCIAL_LOGIN: true
     volumes:
       - ./config/librechat.yaml:/app/librechat.yaml:ro

@@ -32,7 +32,10 @@ local remaining_path = uri:gsub("^/mcp/[^/]+", "", 1)
 if remaining_path == "" then
     remaining_path = "/"
 end
-local target_url = destination .. remaining_path
+local target_url = destination
+if remaining_path ~= "/" or not destination:match("/mcp$") then
+    target_url = destination .. remaining_path
+end
 if ngx.var.is_args == "?" and ngx.var.args then
     target_url = target_url .. "?" .. ngx.var.args
 end
@@ -49,6 +52,7 @@ headers.host = nil
 headers.Host = nil
 headers["content-length"] = nil
 headers["Content-Length"] = nil
+headers["X-Provost-Request-Id"] = ngx.var.provost_req_id
 
 local client = http.new()
 client:set_timeout(30000)

@@ -50,7 +50,7 @@
 }
 
 @test "verify_proxy_routing.sh: probes Path A chat completions" {
-    run grep -c 'v1/chat/completions' verify_proxy_routing.sh
+    run grep -c 'llm/openwire/v1/chat/completions' verify_proxy_routing.sh
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
@@ -117,6 +117,28 @@
     [ "$output" -ge 1 ]
     run grep -E 'MCP_API_KEY|MCP_SECRET_KEY|MCP_PAPER_TRADE' bootstrap.sh
     [ "$status" -eq 1 ]
+}
+
+@test "bootstrap.sh: exports the JSON LLM routing table from .env" {
+    local env_file="$BATS_TEST_TMPDIR/routes.env"
+    local routes_json='{"openwire":"http://openwire:3030/v1","ollama":"http://ollama:11434/v1"}'
+    printf 'LLM_ROUTES_JSON=%s\n' "$routes_json" > "$env_file"
+
+    run env -i PATH="$PATH" ENV_FILE="$env_file" sh bootstrap.sh dev
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"export LLM_ROUTES_JSON='$routes_json'"* ]]
+}
+
+@test "bootstrap.sh: loads .env routing before EC2 secrets" {
+        run awk '
+            /^  ec2\)/ { in_ec2 = 1 }
+            in_ec2 && /load_env_file/ { env_line = NR }
+            in_ec2 && /load_secrets_manager/ { secrets_line = NR }
+            in_ec2 && /^    ;;/ { exit !(env_line && secrets_line && env_line < secrets_line) }
+        ' bootstrap.sh
+
+        [ "$status" -eq 0 ]
 }
 
 @test "bootstrap.sh: starts OpenResty in container mode" {
