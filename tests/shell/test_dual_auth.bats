@@ -18,14 +18,14 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-@test "dual auth: static compatibility token is not used by Lua" {
-  run grep -R 'PROVOST_TOKEN' "$ROOT_DIR/lua" --include='*.lua'
-  [ "$status" -eq 1 ]
+@test "dual auth: MCP compatibility token is validated by Lua" {
+  run grep -q 'PROVOST_TOKEN' "$ROOT_DIR/lua/http_policy.lua"
+  [ "$status" -eq 0 ]
 }
 
-@test "dual auth: compatibility token is removed from compose" {
+@test "dual auth: compatibility token is provided to proxy and LibreChat" {
   run grep -q 'PROVOST_TOKEN:' "$COMPOSE_FILE"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
 }
 
 @test "dual auth: user and conversation defaults are present" {

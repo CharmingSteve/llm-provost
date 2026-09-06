@@ -1,12 +1,67 @@
 local cjson = require("cjson.safe")
+local audit_body = require("audit_body")
 local audit_error = require("audit_error")
 local routes = require("routes")
 local rules_engine = require("rules_engine")
 
 local MAX_REQUEST_BYTES = 1048576
+local llm_routes_json = os.getenv("LLM_ROUTES_JSON")
+local llm_routes = cjson.decode(llm_routes_json or "")
+
+if type(llm_routes) ~= "table" then
+    llm_routes = nil
+end
 
 local function header(headers, name)
     return headers[name] or headers[name:lower()]
+end
+
+local function read_secret_file(path)
+    local file = io.open(path, "r")
+    if not file then
+        return nil
+    end
+    local value = file:read("*a")
+    file:close()
+    if type(value) ~= "string" then
+        return nil
+    end
+    value = value:gsub("[\r\n]+$", "")
+    return value ~= "" and value or nil
+end
+
+local function expected_provost_token()
+    local cached = ngx.shared.provost_secrets and ngx.shared.provost_secrets:get("token")
+    if cached and cached ~= "" then
+        return cached
+    end
+    local token = read_secret_file("/run/secrets/provost_token") or os.getenv("PROVOST_TOKEN")
+    if token and ngx.shared.provost_secrets then
+        ngx.shared.provost_secrets:set("token", token)
+    end
+    return token
+end
+
+local function valid_provost_token(headers)
+    local expected = expected_provost_token()
+    if not expected then
+        return false, "Provost token is not configured"
+    end
+
+    local provided = header(headers, "X-Provost-Token") or ngx.var.http_x_provost_token
+    if not provided or provided == "" then
+        local authorization = header(headers, "Authorization") or ngx.var.http_authorization
+        if type(authorization) == "string" then
+            provided = authorization:match("^[Bb][Ee][Aa][Rr][Ee][Rr]%s+(.+)$")
+        end
+    end
+    if type(provided) == "string" then
+        provided = provided:gsub("[\r\n]+$", "")
+    end
+    if provided ~= expected then
+        return false, "Invalid Provost token"
+    end
+    return true
 end
 
 local function decode_jwt_user(auth_header)
@@ -98,14 +153,31 @@ local function reject(reason, status, error_code)
     return ngx.exit(status)
 end
 
+local function reject_route(reason, status, error_code)
+    local response_body = cjson.encode({ error = reason })
+    ngx.var.resp_body = response_body
+    audit_error.emit("provost_request_error", status, error_code, reason, {
+        resp_body = response_body,
+    })
+    ngx.status = status
+    ngx.header["Content-Type"] = "application/json"
+    ngx.say(response_body)
+    return ngx.exit(status)
+end
+
 local headers = ngx.req.get_headers()
 local uri = ngx.var.uri or ""
 local is_mcp_path = uri:match("^/mcp/") ~= nil
 
-local user_id
 if is_mcp_path then
-    user_id = header(headers, "X-Cognito-User")
-else
+    local authenticated, auth_error = valid_provost_token(headers)
+    if not authenticated then
+        return reject_route(auth_error, ngx.HTTP_UNAUTHORIZED, "PROVOST_TOKEN_INVALID")
+    end
+end
+
+local user_id = header(headers, "X-Cognito-User")
+if type(user_id) ~= "string" or user_id == "" then
     user_id = decode_jwt_user(header(headers, "Authorization"))
 end
 if type(user_id) ~= "string" or user_id == "" then
@@ -140,7 +212,7 @@ if not body then
     ngx.var.req_body = ""
     return reject(body_error, ngx.HTTP_INTERNAL_SERVER_ERROR, "REQUEST_BODY_READ_ERROR")
 end
-ngx.var.req_body = body
+ngx.var.req_body = audit_body.compact_request(body, os.getenv("AUDIT_LOG_MODE") or "compact")
 ngx.ctx.request_body = body
 local customer_id = "craig"
 local parsed = is_mcp_path and cjson.decode(body) or nil
@@ -162,7 +234,36 @@ ngx.ctx.customer_id = customer_id
 ngx.var.provost_customer_id = customer_id
 
 if not is_mcp_path then
-    ngx.var.llm_target_url = os.getenv("LLM_API_URL") or ""
+    if not llm_routes then
+        return reject_route(
+            "LLM backend routing is not configured",
+            ngx.HTTP_INTERNAL_SERVER_ERROR,
+            "LLM_ROUTES_INVALID"
+        )
+    end
+
+    local backend_name = ngx.var.backend_name
+    local backend_url = backend_name and llm_routes[backend_name]
+    if type(backend_url) ~= "string" then
+        return reject_route(
+            "Unknown LLM backend: " .. (backend_name or ""),
+            ngx.HTTP_NOT_FOUND,
+            "LLM_BACKEND_UNKNOWN"
+        )
+    end
+    if not backend_url:match("^https?://[^%s/#@]+[^%s#@]*$") then
+        return reject_route(
+            "LLM backend routing is not configured",
+            ngx.HTTP_INTERNAL_SERVER_ERROR,
+            "LLM_ROUTE_INVALID"
+        )
+    end
+
+    local backend_path = uri:match("^/llm/[^/]+/v1(.*)$")
+    if backend_path == nil then
+        return reject_route("Invalid LLM backend path", ngx.HTTP_NOT_FOUND, "LLM_PATH_INVALID")
+    end
+    ngx.var.llm_target_url = backend_url:gsub("/$", "") .. backend_path
 end
 
 local allowed, reason = rules_engine.check_request(
@@ -175,9 +276,22 @@ local allowed, reason = rules_engine.check_request(
         customer_id = customer_id,
         conversation_id = conversation_id,
         is_mcp_path = is_mcp_path,
+        mcp_server_name = ngx.ctx.mcp_server_name,
+        store = ngx.shared.provost_ctx,
     }
 )
 
 if not allowed then
     return reject(reason)
+end
+
+-- Persist the 4-layer identity so the outbound MCP-to-API hop (port 8081)
+-- can restore it even when the MCP server strips provost headers.
+if is_mcp_path then
+    require("outbound_identity").store(
+        ngx.var.provost_req_id,
+        user_id,
+        customer_id,
+        conversation_id
+    )
 end

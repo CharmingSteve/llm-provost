@@ -7,12 +7,18 @@ COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
 VERSIONS_FILE="$PROJECT_ROOT/.env.versions"
 
 usage() {
-	echo "Usage: $0 [--no-deps] {up|down|restart|logs|build|pull} [service ...]" >&2
+	echo "Usage: $0 [--no-deps] {up|down|restart|logs|build|pull|ps} [options|service ...]" >&2
 	exit 2
 }
 
-if [ ! -f "$PROJECT_ROOT/.env" ]; then
-	echo "WARN: $PROJECT_ROOT/.env is missing; secret-backed services may not start" >&2
+cd "$PROJECT_ROOT"
+
+# Docker Compose parses .env as a dotenv file; do not source it as shell code.
+# CI and production provide values through their environment or bootstrap.
+if [ -f "$PROJECT_ROOT/.env" ]; then
+	:
+else
+	echo "WARN: $PROJECT_ROOT/.env is missing; using environment values" >&2
 fi
 
 no_deps=false
@@ -25,11 +31,16 @@ mode="${1:-}"
 [ -n "$mode" ] || usage
 shift
 
-if [ "$#" -eq 0 ]; then
-	set -- llm-provost fluent-bit mcp-server api mongodb meilisearch
+if [ "$#" -eq 0 ] && [ "$mode" != "ps" ]; then
+	set -- llm-provost fluent-bit mcp-server alpaca-mcp api mongodb meilisearch
 fi
 
 compose() {
+	if [ -f "$PROJECT_ROOT/.env" ]; then
+		docker compose --env-file "$VERSIONS_FILE" --env-file "$PROJECT_ROOT/.env" -f "$COMPOSE_FILE" "$@"
+		return
+	fi
+
 	docker compose --env-file "$VERSIONS_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
@@ -59,6 +70,9 @@ case "$mode" in
 		;;
 	pull)
 		compose pull "$@"
+		;;
+	ps)
+		compose ps "$@"
 		;;
 	*)
 		usage
