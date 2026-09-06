@@ -100,6 +100,7 @@ In this repository, example integration is shown in [config/librechat.yaml](conf
 
 - OpenWire traffic is routed through http://llm-provost:8000/llm/openwire/v1
 - Ollama traffic is routed through http://llm-provost:8000/llm/ollama/v1
+- Amazon Bedrock is available through LibreChat's native Bedrock provider
 - MCP tool traffic is routed through /mcp/<server>
 
 ### Multiple LLM Backends
@@ -107,12 +108,24 @@ In this repository, example integration is shown in [config/librechat.yaml](conf
 Define every allowed LLM backend in `.env` as one JSON object. Backend names become the first path segment after `/llm/`, and each value is the upstream API base URL:
 
 ```sh
-LLM_ROUTES_JSON={"openwire":"http://host.docker.internal:3030/v1","ollama":"http://xps:11434/v1","bedrock":"https://bedrock-runtime.us-east-1.amazonaws.com"}
+LLM_ROUTES_JSON={"openwire":"http://host.docker.internal:3030/v1","ollama":"http://xps:11434/v1","bedrock":"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"}
 ```
 
 A client configured with `http://llm-provost:8000/llm/openwire/v1` therefore sends chat completions to the `openwire` URL. Add another backend by adding a unique lowercase name and an HTTP or HTTPS URL to the JSON object, then restart the proxy so OpenResty reloads its environment. Unknown backend names return HTTP 404; missing, malformed, or invalid routing configuration fails closed with HTTP 500. There is no single-backend fallback.
 
 Keep credentials in their existing environment variables, such as `OPENAI_API_KEY` and `OLLAMA_API_KEY`; do not put credentials in backend URLs. LLM requests continue through the same policy, Cognito identity extraction, four-layer ID logging, request/response audit capture, and authorization forwarding used by the original route. MCP routing remains configured separately in `mcp_routes.json`.
+
+### Amazon Bedrock
+
+Enable LibreChat's native Bedrock provider with the following root `.env` values:
+
+```sh
+BEDROCK_ENABLED=true
+BEDROCK_AWS_DEFAULT_REGION=us-east-1
+BEDROCK_MODEL=anthropic.claude-sonnet-4
+```
+
+The provider uses the AWS SDK default credential provider chain. It resolves environment credentials, the read-only shared `~/.aws` configuration mounted by Compose, ECS/EKS task credentials, and EC2 instance metadata credentials; no Bedrock-specific access keys are required. `BEDROCK_AWS_MODELS` is intentionally unset, so LibreChat displays its full supported Bedrock model catalog. Set it only to restrict the list for a deployment.
 
 ### Routing Tests
 

@@ -32,8 +32,8 @@
   [ "$status" -eq 0 ]
 }
 
-@test "LibreChat uses custom endpoints without the built-in OpenAI reverse proxy" {
-  run grep -E '^\s*ENDPOINTS:\s*"custom"$' docker-compose.yml
+@test "LibreChat uses custom and native Bedrock endpoints without the built-in OpenAI reverse proxy" {
+  run grep -E '^\s*ENDPOINTS:\s*"custom,bedrock"$' docker-compose.yml
   [ "$status" -eq 0 ]
   run grep 'OPENAI_REVERSE_PROXY' .env .env.example docker-compose.yml
   [ "$status" -ne 0 ]

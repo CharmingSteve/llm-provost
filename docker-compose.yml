@@ -198,7 +198,11 @@ services:
       SEARCH: "true"
       MEILI_HOST: "http://meilisearch:7700"
       MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-provost-dev-meili-key}"
-      ENDPOINTS: "custom"
+      ENDPOINTS: "custom,bedrock"
+      AWS_SDK_LOAD_CONFIG: "1"
+      BEDROCK_ENABLED: ${BEDROCK_ENABLED:-true}
+      BEDROCK_AWS_DEFAULT_REGION: ${BEDROCK_AWS_DEFAULT_REGION:-${AWS_REGION:-us-east-1}}
+      BEDROCK_AWS_PROFILE: ${BEDROCK_AWS_PROFILE:-}
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OLLAMA_API_KEY: "${OLLAMA_API_KEY:-}"
       PROVOST_TOKEN: "${PROVOST_TOKEN:-}"
@@ -208,6 +212,7 @@ services:
       - librechat_images:/app/client/public/images
       - librechat_uploads:/app/uploads
       - ./.env:/app/.env:ro
+      - ${HOME}/.aws:/home/node/.aws:ro
     networks:
       - app_net
       - proxy_egress

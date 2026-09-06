@@ -4,6 +4,10 @@ registration:
   socialLogins: ["openid"]
 
 endpoints:
+  bedrock:
+    availableRegions:
+      - 'us-east-1'
+
 #   anthropic:
 #     apiKey: "${ANTHROPIC_API_KEY}"
 #     promptCache: true
@@ -36,6 +40,7 @@ endpoints:
         default:
           - "llama3.1:8b"
         fetch: true
+
     
 interface:
   mcpServers:
