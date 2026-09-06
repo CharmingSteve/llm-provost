@@ -122,7 +122,7 @@ Enable LibreChat's native Bedrock provider with the following root `.env` values
 ```sh
 BEDROCK_ENABLED=true
 BEDROCK_AWS_DEFAULT_REGION=us-east-1
-BEDROCK_MODEL=anthropic.claude-sonnet-4
+BEDROCK_MODEL=us.anthropic.claude-sonnet-4-6
 ```
 
 The provider uses the AWS SDK default credential provider chain. It resolves environment credentials, the read-only shared `~/.aws` configuration mounted by Compose, ECS/EKS task credentials, and EC2 instance metadata credentials; no Bedrock-specific access keys are required. `BEDROCK_AWS_MODELS` is intentionally unset, so LibreChat displays its full supported Bedrock model catalog. Set it only to restrict the list for a deployment.
