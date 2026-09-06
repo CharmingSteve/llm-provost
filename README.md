@@ -100,7 +100,7 @@ In this repository, example integration is shown in [config/librechat.yaml](conf
 
 - OpenWire traffic is routed through http://llm-provost:8000/llm/openwire/v1
 - Ollama traffic is routed through http://llm-provost:8000/llm/ollama/v1
-- Amazon Bedrock is available through LibreChat's native Bedrock provider
+- Amazon Bedrock traffic is routed through http://llm-provost:8000/llm/bedrock/v1
 - MCP tool traffic is routed through /mcp/<server>
 
 ### Multiple LLM Backends
@@ -117,15 +117,15 @@ Keep credentials in their existing environment variables, such as `OPENAI_API_KE
 
 ### Amazon Bedrock
 
-Enable LibreChat's native Bedrock provider with the following root `.env` values:
+Enable LibreChat's Bedrock-via-Provost custom endpoint with the following root `.env` values:
 
 ```sh
 BEDROCK_ENABLED=true
 BEDROCK_AWS_DEFAULT_REGION=us-east-1
-BEDROCK_MODEL=us.anthropic.claude-sonnet-4-6
+BEDROCK_MODEL=openai.gpt-oss-20b-1:0
 ```
 
-The provider uses the AWS SDK default credential provider chain. It resolves environment credentials, the read-only shared `~/.aws` configuration mounted by Compose, ECS/EKS task credentials, and EC2 instance metadata credentials; no Bedrock-specific access keys are required. `BEDROCK_AWS_MODELS` is intentionally unset, so LibreChat displays its full supported Bedrock model catalog. Set it only to restrict the list for a deployment.
+LibreChat sends Bedrock requests only to `http://llm-provost:8000/llm/bedrock/v1`. The proxy applies its rules and audit capture before resolving AWS credentials through environment variables, the read-only shared `~/.aws` configuration, ECS/EKS task credentials, or EC2 instance metadata credentials. It SigV4-signs the approved upstream request without recording credentials or signing headers. `fetch: true` uses the proxy's signed `ListFoundationModels` call to expose text-capable Bedrock models in LibreChat. Choose a model that supports Amazon Bedrock's OpenAI-compatible Chat Completions API; the default is verified against that API.
 
 ### Routing Tests
 

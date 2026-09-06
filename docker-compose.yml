@@ -117,11 +117,12 @@ services:
       - "8081"
     volumes:
       - ./.env:/app/.env:ro
-      - ./default.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - ./default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./lua:/etc/nginx/lua:ro
       - ./rules.json:/etc/nginx/rules.json:ro
       - ./mcp_routes.json:/etc/nginx/mcp_routes/mcp_routes.json:ro
       - ${PROVOST_SECRETS_DIR:-./.secrets}:/run/secrets:ro
+      - ${AWS_SHARED_CREDENTIALS_DIR:-${HOME}/.aws}:/home/provost/.aws:ro
       - provost_run:/var/run/provost
       - /etc/localtime:/etc/localtime:ro
     environment:
@@ -130,6 +131,14 @@ services:
       AUDIT_LOG_MODE: ${AUDIT_LOG_MODE:-compact}
       MCP_ROUTING_TABLE_PATH: /etc/nginx/mcp_routes/mcp_routes.json
       PROVOST_TOKEN: ${PROVOST_TOKEN:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_PROFILE: ${AWS_PROFILE:-}
+      AWS_SHARED_CREDENTIALS_FILE: /home/provost/.aws/credentials
+      BEDROCK_ENABLED: ${BEDROCK_ENABLED:-true}
+      BEDROCK_AWS_DEFAULT_REGION: ${BEDROCK_AWS_DEFAULT_REGION:-${AWS_REGION:-us-east-1}}
       TZ: ${TZ:-Asia/Jerusalem}
     networks:
       - mcp_internal
@@ -198,11 +207,8 @@ services:
       SEARCH: "true"
       MEILI_HOST: "http://meilisearch:7700"
       MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-provost-dev-meili-key}"
-      ENDPOINTS: "custom,bedrock"
-      AWS_SDK_LOAD_CONFIG: "1"
-      BEDROCK_ENABLED: ${BEDROCK_ENABLED:-true}
-      BEDROCK_AWS_DEFAULT_REGION: ${BEDROCK_AWS_DEFAULT_REGION:-${AWS_REGION:-us-east-1}}
-      BEDROCK_AWS_PROFILE: ${BEDROCK_AWS_PROFILE:-}
+      ENDPOINTS: "custom"
+      LLM_API_KEY: "${LLM_API_KEY:-provost-local}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OLLAMA_API_KEY: "${OLLAMA_API_KEY:-}"
       PROVOST_TOKEN: "${PROVOST_TOKEN:-}"
@@ -212,7 +218,6 @@ services:
       - librechat_images:/app/client/public/images
       - librechat_uploads:/app/uploads
       - ./.env:/app/.env:ro
-      - ${HOME}/.aws:/home/node/.aws:ro
     networks:
       - app_net
       - proxy_egress

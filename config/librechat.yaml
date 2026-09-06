@@ -4,10 +4,6 @@ registration:
   socialLogins: ["openid"]
 
 endpoints:
-  bedrock:
-    availableRegions:
-      - 'us-east-1'
-
 #   anthropic:
 #     apiKey: "${ANTHROPIC_API_KEY}"
 #     promptCache: true
@@ -39,6 +35,17 @@ endpoints:
       models:
         default:
           - "llama3.1:8b"
+        fetch: true
+
+    - name: "Bedrock via Provost"
+      apiKey: "${LLM_API_KEY}"
+      baseURL: "http://llm-provost:8000/llm/bedrock/v1"
+      headers:
+        X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+        X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
+      models:
+        default:
+          - "${BEDROCK_MODEL}"
         fetch: true
 
     
