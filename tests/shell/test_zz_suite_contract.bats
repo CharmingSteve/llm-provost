@@ -57,13 +57,13 @@ setup() {
 }
 
 @test "audit records use the Fluent Bit S3 output tags" {
-  grep -q 'Match                 provost.access$' "$ROOT_DIR/fluent-bit/conf.d/output-s3.conf"
-  grep -q 'Match                 provost.error$' "$ROOT_DIR/fluent-bit/conf.d/output-s3.conf"
+  grep -q 'Match                 provost.access\*$' "$ROOT_DIR/fluent-bit/conf.d/output-s3.conf"
+  grep -q 'Match                 provost.error\*$' "$ROOT_DIR/fluent-bit/conf.d/output-s3.conf"
 }
 
 @test "audit records use the Fluent Bit local output tags" {
-  grep -q 'Match         provost.access$' "$ROOT_DIR/fluent-bit/conf.d/filter-local-copy.conf"
-  grep -q 'Match         provost.error$' "$ROOT_DIR/fluent-bit/conf.d/filter-local-copy.conf"
+  grep -q 'Match         provost.access\*$' "$ROOT_DIR/fluent-bit/conf.d/filter-local-copy.conf"
+  grep -q 'Match         provost.error\*$' "$ROOT_DIR/fluent-bit/conf.d/filter-local-copy.conf"
 }
 
 @test "merge contract: unified suite completes with 0 failed governance preconditions" {

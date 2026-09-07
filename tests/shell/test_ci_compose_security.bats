@@ -76,6 +76,17 @@
   [ "$status" -eq 0 ]
 }
 
+@test "Fluent Bit tails finalized proxy access records from the shared runtime volume" {
+  run grep -F 'access_log /var/run/provost/llm-access.log json_full;' default.conf
+  [ "$status" -eq 0 ]
+  run grep -E '^\s*Name\s+tail$' fluent-bit/conf.d/input-syslog.conf
+  [ "$status" -eq 0 ]
+  run grep -F 'Path                  /var/run/provost/llm-access.log' fluent-bit/conf.d/input-syslog.conf
+  [ "$status" -eq 0 ]
+  run grep -F 'Read_from_Head        true' fluent-bit/conf.d/input-syslog.conf
+  [ "$status" -eq 0 ]
+}
+
 @test "CI validates compose config with env-file" {
   run grep -E 'docker compose --env-file .env\.versions -f docker-compose\.yml config --quiet' .github/workflows/ci.yml
   [ "$status" -eq 0 ]
