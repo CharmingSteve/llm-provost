@@ -35,7 +35,7 @@ local function expected_provost_token()
     if cached and cached ~= "" then
         return cached
     end
-    local token = read_secret_file("/run/secrets/provost_token") or os.getenv("PROVOST_TOKEN")
+    local token = os.getenv("PROVOST_TOKEN") or read_secret_file("/run/secrets/provost_token")
     if token and ngx.shared.provost_secrets then
         ngx.shared.provost_secrets:set("token", token)
     end

@@ -21,6 +21,8 @@ setup() {
 @test "dual auth: MCP compatibility token is validated by Lua" {
   run grep -q 'PROVOST_TOKEN' "$ROOT_DIR/lua/http_policy.lua"
   [ "$status" -eq 0 ]
+  run grep -Fq 'os.getenv("PROVOST_TOKEN") or read_secret_file("/run/secrets/provost_token")' "$POLICY_FILE"
+  [ "$status" -eq 0 ]
 }
 
 @test "dual auth: compatibility token is provided to proxy and LibreChat" {
