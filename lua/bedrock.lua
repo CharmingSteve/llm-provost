@@ -9,31 +9,64 @@ local function region()
     return os.getenv("BEDROCK_AWS_DEFAULT_REGION") or os.getenv("AWS_REGION") or "us-east-1"
 end
 
+-- Explicitly parse the shared credentials file (ini format).
+-- Resolution: env vars first, then AWS_SHARED_CREDENTIALS_FILE, profile [default].
+local function resolve_credentials()
+    local access_key = os.getenv("AWS_ACCESS_KEY_ID")
+    local secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+    local session_token = os.getenv("AWS_SESSION_TOKEN")
+    if access_key == "" then access_key = nil end
+    if secret_key == "" then secret_key = nil end
+    if session_token == "" then session_token = nil end
+    if access_key and secret_key then
+        return access_key, secret_key, session_token, "env"
+    end
+
+    local path = os.getenv("AWS_SHARED_CREDENTIALS_FILE") or "/home/provost/.aws/credentials"
+    local profile = os.getenv("AWS_PROFILE")
+    if profile == "" or not profile then profile = "default" end
+
+    local file = io.open(path, "r")
+    if not file then
+        return nil, nil, nil, "credentials file not found: " .. path
+    end
+    local current, found = nil, nil
+    for line in file:lines() do
+        local section = line:match("^%s*%[(.+)%]%s*$")
+        if section then
+            current = section
+        elseif current == profile then
+            local k, v = line:match("^%s*([%w_]+)%s*=%s*(%S+)%s*$")
+            if k and v then
+                found = found or {}
+                found[k] = v
+            end
+        end
+    end
+    file:close()
+    if not found or not found.aws_access_key_id or not found.aws_secret_access_key then
+        return nil, nil, nil, "profile [" .. profile .. "] missing in " .. path
+    end
+    return found.aws_access_key_id, found.aws_secret_access_key, found.aws_session_token, "file:" .. profile
+end
+
 local function signed_headers(method, host, path, body)
     local aws = AWS({
         region = region(),
         endpointPrefix = "bedrock",
         signatureVersion = "v4",
     })
-    local access_key = os.getenv("AWS_ACCESS_KEY_ID")
-    local secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-    if access_key == "" then
-        access_key = nil
+    local access_key, secret_key, session_token, source = resolve_credentials()
+    if not access_key then
+        return nil, "no AWS credentials resolved: " .. tostring(source)
     end
-    if secret_key == "" then
-        secret_key = nil
-    end
-    local session_token = os.getenv("AWS_SESSION_TOKEN")
-    if session_token == "" then
-        session_token = nil
-    end
-    if access_key and secret_key then
-        aws.config.credentials = aws:Credentials({
-            accessKeyId = access_key,
-            secretAccessKey = secret_key,
-            sessionToken = session_token,
-        })
-    end
+    ngx.log(ngx.INFO, "bedrock: signing with credentials from ", source,
+            " key=", string.sub(access_key, 1, 8), "...")
+    aws.config.credentials = aws:Credentials({
+        accessKeyId = access_key,
+        secretAccessKey = secret_key,
+        sessionToken = session_token,
+    })
     local signed, err = sign_request(aws.config, {
         method = method,
         host = host,
@@ -81,7 +114,9 @@ function _M.models()
         return nil, request_err
     end
     if response.status < 200 or response.status >= 300 then
+        -- Surface the REAL AWS error so it lands in the logs.
         return nil, "Bedrock model listing returned status " .. response.status
+            .. " body: " .. string.sub(response.body or "", 1, 500)
     end
     local payload = cjson.decode(response.body)
     if type(payload) ~= "table" or type(payload.modelSummaries) ~= "table" then
