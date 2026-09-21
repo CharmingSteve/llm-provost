@@ -32,12 +32,20 @@
   [ "$status" -eq 0 ]
 }
 
-@test "LibreChat uses custom endpoints without the built-in OpenAI reverse proxy" {
+@test "LibreChat routes Bedrock through the custom governed proxy" {
   run grep -E '^\s*ENDPOINTS:\s*"custom"$' docker-compose.yml
   [ "$status" -eq 0 ]
   run grep 'OPENAI_REVERSE_PROXY' .env .env.example docker-compose.yml
   [ "$status" -ne 0 ]
   run grep -F 'baseURL: "http://llm-provost:8000/llm/openwire/v1"' config/librechat.yaml
+  [ "$status" -eq 0 ]
+  run grep -F 'baseURL: "http://llm-provost:8000/llm/bedrock/v1"' config/librechat.yaml
+  [ "$status" -eq 0 ]
+  run grep -F 'name: "Bedrock via Provost"' config/librechat.yaml
+  [ "$status" -eq 0 ]
+  run grep -F '/home/node/.aws' docker-compose.yml
+  [ "$status" -ne 0 ]
+  run grep -E '^\s*LLM_API_KEY:\s*"\$\{LLM_API_KEY:-provost-local\}"' docker-compose.yml
   [ "$status" -eq 0 ]
   run grep -E '^\s*OLLAMA_API_KEY:\s*"\$\{OLLAMA_API_KEY:-\}"' docker-compose.yml
   [ "$status" -eq 0 ]
@@ -65,6 +73,17 @@
   run grep -E '^\s*AWS_SESSION_TOKEN:\s*\$\{AWS_SESSION_TOKEN:-\}$' docker-compose.yml
   [ "$status" -eq 0 ]
   run grep -E '^\s*S3_BUCKET:\s*\$\{S3_BUCKET:-llm-provost-local\}$' docker-compose.yml
+  [ "$status" -eq 0 ]
+}
+
+@test "Fluent Bit tails finalized proxy access records from the shared runtime volume" {
+  run grep -F 'access_log /var/run/provost/llm-access.log json_full;' default.conf
+  [ "$status" -eq 0 ]
+  run grep -E '^\s*Name\s+tail$' fluent-bit/conf.d/input-syslog.conf
+  [ "$status" -eq 0 ]
+  run grep -F 'Path                  /var/run/provost/llm-access.log' fluent-bit/conf.d/input-syslog.conf
+  [ "$status" -eq 0 ]
+  run grep -F 'Read_from_Head        true' fluent-bit/conf.d/input-syslog.conf
   [ "$status" -eq 0 ]
 }
 

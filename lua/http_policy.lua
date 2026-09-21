@@ -35,7 +35,7 @@ local function expected_provost_token()
     if cached and cached ~= "" then
         return cached
     end
-    local token = read_secret_file("/run/secrets/provost_token") or os.getenv("PROVOST_TOKEN")
+    local token = os.getenv("PROVOST_TOKEN") or read_secret_file("/run/secrets/provost_token")
     if token and ngx.shared.provost_secrets then
         ngx.shared.provost_secrets:set("token", token)
     end
@@ -243,6 +243,9 @@ if not is_mcp_path then
     end
 
     local backend_name = ngx.var.backend_name
+    if not backend_name and uri == "/llm/bedrock/v1/models" then
+        backend_name = "bedrock"
+    end
     local backend_url = backend_name and llm_routes[backend_name]
     if type(backend_url) ~= "string" then
         return reject_route(
@@ -263,7 +266,14 @@ if not is_mcp_path then
     if backend_path == nil then
         return reject_route("Invalid LLM backend path", ngx.HTTP_NOT_FOUND, "LLM_PATH_INVALID")
     end
-    ngx.var.llm_target_url = backend_url:gsub("/$", "") .. backend_path
+    if backend_name == "bedrock" then
+        if os.getenv("BEDROCK_ENABLED") ~= "true" then
+            return reject_route("Bedrock backend is disabled", ngx.HTTP_NOT_FOUND, "BEDROCK_DISABLED")
+        end
+        ngx.var.bedrock_path = "/openai/v1" .. backend_path
+    else
+        ngx.var.llm_target_url = backend_url:gsub("/$", "") .. backend_path
+    end
 end
 
 local allowed, reason = rules_engine.check_request(
@@ -283,6 +293,14 @@ local allowed, reason = rules_engine.check_request(
 
 if not allowed then
     return reject(reason)
+end
+
+if not is_mcp_path and ngx.var.backend_name == "bedrock" then
+    local host, signing_error = require("bedrock").prepare_request(body)
+    if not host then
+        return reject_route("Bedrock authentication is unavailable", ngx.HTTP_SERVICE_UNAVAILABLE, "BEDROCK_AUTH_UNAVAILABLE")
+    end
+    ngx.var.llm_target_url = "https://" .. host .. ngx.var.bedrock_path
 end
 
 -- Persist the 4-layer identity so the outbound MCP-to-API hop (port 8081)

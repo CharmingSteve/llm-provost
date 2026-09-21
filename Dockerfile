@@ -12,6 +12,8 @@ RUN apt-get update \
     && luarocks install lua-resty-http \
     && luarocks install lua-resty-jwt \
     && luarocks install lua-cjson \
+    && luarocks install luasocket \
+    && luarocks install api7-lua-resty-aws \
     && groupadd --gid 65532 provost \
     && useradd --uid 65532 --gid 65532 --no-create-home --shell /usr/sbin/nologin provost \
     && mkdir -p /etc/nginx/conf.d /etc/nginx/lua /etc/nginx/mcp_routes /var/log/nginx /var/run/nginx \
