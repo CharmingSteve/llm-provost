@@ -19,7 +19,6 @@ describe("bedrock credential caching", function()
             aws = package.loaded["resty.aws"],
             sign = package.loaded["resty.aws.request.sign"],
             http = package.loaded["resty.http"],
-            bedrock = package.loaded.bedrock,
         }
         signs, clients = 0, 0
         dict = fake_dict()
@@ -28,7 +27,7 @@ describe("bedrock credential caching", function()
         file:write("[default]\naws_access_key_id = AKIAFILEKEY1234\naws_secret_access_key = secret1\n")
         file:close()
 
-        os.getenv = function(name) -- luacheck: ignore 122
+        local function getenv(name)
             if name == "AWS_SHARED_CREDENTIALS_FILE" then return credential_file end
             if name == "AWS_ACCESS_KEY_ID" or name == "AWS_SECRET_ACCESS_KEY"
                 or name == "AWS_SESSION_TOKEN" or name == "AWS_PROFILE" then
@@ -36,6 +35,9 @@ describe("bedrock credential caching", function()
             end
             return saved.os_getenv(name)
         end
+        local environment = setmetatable({
+            os = setmetatable({ getenv = getenv }, { __index = os }),
+        }, { __index = _G })
         _G.ngx = {
             shared = { bedrock_creds = dict },
             log = function() end,
@@ -55,18 +57,22 @@ describe("bedrock credential caching", function()
             return { headers = { Authorization = "AWS4 " .. config.credentials.accessKeyId } }
         end
         package.loaded["resty.http"] = {}
-        package.loaded.bedrock = nil
-        bedrock = require("bedrock")
+        local chunk
+        if setfenv then
+            chunk = assert(loadfile("lua/bedrock.lua"))
+            setfenv(chunk, environment)
+        else
+            chunk = assert(loadfile("lua/bedrock.lua", "t", environment))
+        end
+        bedrock = chunk()
     end)
 
     after_each(function()
         os.remove(credential_file)
-        os.getenv = saved.os_getenv -- luacheck: ignore 122
         _G.ngx = saved.ngx
         package.loaded["resty.aws"] = saved.aws
         package.loaded["resty.aws.request.sign"] = saved.sign
         package.loaded["resty.http"] = saved.http
-        package.loaded.bedrock = saved.bedrock
     end)
 
     local function sign()
@@ -77,6 +83,13 @@ describe("bedrock credential caching", function()
         }
         return bedrock.prepare_request("{}")
     end
+
+    it("isolates the environment mock from the global os library", function()
+        assert.equals(saved.os_getenv, os.getenv)
+        assert.is_truthy(sign())
+        assert.equals("AWS4 AKIAFILEKEY1234", ngx.var.h_Authorization)
+        assert.equals(saved.os_getenv, os.getenv)
+    end)
 
     it("reads the credentials file once across requests", function()
         assert.equals("bedrock-runtime.us-east-1.amazonaws.com", sign())
