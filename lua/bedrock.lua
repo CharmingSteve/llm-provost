@@ -50,24 +50,74 @@ local function resolve_credentials()
     return found.aws_access_key_id, found.aws_secret_access_key, found.aws_session_token, "file:" .. profile
 end
 
-local function signed_headers(method, host, path, body)
-    local aws = AWS({
-        region = region(),
-        endpointPrefix = "bedrock",
-        signatureVersion = "v4",
-    })
+-- Credentials are resolved once and cached in a shared dict so the ini file is
+-- not re-read on every Bedrock request. The TTL is a safety net for rotated
+-- file-based credentials; auth failures invalidate the cache immediately.
+local CACHE_KEY = "credentials"
+local CACHE_TTL = 300
+
+local function creds_cache()
+    return ngx.shared and ngx.shared.bedrock_creds
+end
+
+function _M.invalidate()
+    local dict = creds_cache()
+    if dict then
+        dict:delete(CACHE_KEY)
+    end
+end
+
+local function get_credentials()
+    local dict = creds_cache()
+    local cached = dict and dict:get(CACHE_KEY)
+    if cached then
+        local decoded = cjson.decode(cached)
+        if type(decoded) == "table" and decoded.access_key and decoded.secret_key then
+            return decoded.access_key, decoded.secret_key, decoded.session_token
+        end
+    end
+
     local access_key, secret_key, session_token, source = resolve_credentials()
     if not access_key then
-        return nil, "no AWS credentials resolved: " .. tostring(source)
+        return nil, nil, nil, source
     end
-    ngx.log(ngx.INFO, "bedrock: signing with credentials from ", source,
+    ngx.log(ngx.INFO, "bedrock: resolved credentials from ", source,
             " key=", string.sub(access_key, 1, 8), "...")
+    if dict then
+        dict:set(CACHE_KEY, cjson.encode({
+            access_key = access_key,
+            secret_key = secret_key,
+            session_token = session_token,
+        }), CACHE_TTL)
+    end
+    return access_key, secret_key, session_token
+end
+
+-- One AWS client per worker; only the credentials change between calls.
+local aws_client
+local function client()
+    if not aws_client then
+        aws_client = AWS({
+            region = region(),
+            endpointPrefix = "bedrock",
+            signatureVersion = "v4",
+        })
+    end
+    return aws_client
+end
+
+local function signed_headers(method, host, path, body)
+    local access_key, secret_key, session_token, err = get_credentials()
+    if not access_key then
+        return nil, "no AWS credentials resolved: " .. tostring(err)
+    end
+    local aws = client()
     aws.config.credentials = aws:Credentials({
         accessKeyId = access_key,
         secretAccessKey = secret_key,
         sessionToken = session_token,
     })
-    local signed, err = sign_request(aws.config, {
+    local signed, sign_err = sign_request(aws.config, {
         method = method,
         host = host,
         port = 443,
@@ -75,7 +125,7 @@ local function signed_headers(method, host, path, body)
         body = body or "",
         headers = {},
     })
-    return signed and signed.headers or nil, err
+    return signed and signed.headers or nil, sign_err
 end
 
 function _M.runtime_host()
@@ -112,6 +162,9 @@ function _M.models()
     })
     if not response then
         return nil, request_err
+    end
+    if response.status == 401 or response.status == 403 then
+        _M.invalidate()
     end
     if response.status < 200 or response.status >= 300 then
         -- Surface the REAL AWS error so it lands in the logs.

@@ -9,6 +9,17 @@ local function run_policy(options)
     local preload_audit_error = package.preload.audit_error
     local preload_routes = package.preload.routes
     local preload_rules_engine = package.preload.rules_engine
+    local loaded_bedrock = package.loaded.bedrock
+    local preload_bedrock = package.preload.bedrock
+    package.loaded.bedrock = nil
+    package.preload.bedrock = function()
+        return {
+            prepare_request = function()
+                options.bedrock_calls = (options.bedrock_calls or 0) + 1
+                return "bedrock-runtime.us-east-1.amazonaws.com"
+            end,
+        }
+    end
     package.loaded.audit_error = nil
     package.loaded.routes = nil
     package.loaded.rules_engine = nil
@@ -48,6 +59,7 @@ local function run_policy(options)
             provost_customer_id = "craig",
             provost_conversation_id = "none",
             llm_target_url = "",
+            bedrock_path = "",
             req_body = "",
             resp_body = "",
         },
@@ -101,6 +113,9 @@ local function run_policy(options)
                 return options.routes_json
                     or '{"openwire":"http://openwire:3030/v1","ollama":"http://ollama:11434/v1"}'
             end
+            if name == "BEDROCK_ENABLED" then
+                return options.bedrock_enabled
+            end
             if name == "PROVOST_TOKEN" then
                 return "test-provost-token"
             end
@@ -122,6 +137,8 @@ local function run_policy(options)
     package.preload.audit_error = preload_audit_error
     package.preload.routes = preload_routes
     package.preload.rules_engine = preload_rules_engine
+    package.loaded.bedrock = loaded_bedrock
+    package.preload.bedrock = preload_bedrock
     return ngx
 end
 
@@ -218,6 +235,39 @@ describe("four-layer identity extraction", function()
         local result = run_policy({uri = "/llm/ollama/v1/chat/completions", backend_name = "ollama"})
         assert.equals("http://ollama:11434/v1/chat/completions", result.var.llm_target_url)
         assert.is_nil(result.exit_status)
+    end)
+
+    it("never invokes Bedrock signing for Ollama or vLLM backends", function()
+        local routes_json = '{"ollama":"http://ollama:11434/v1","vllm":"http://vllm:8000/v1",'
+            .. '"bedrock":"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"}'
+        for _, backend in ipairs({"ollama", "vllm"}) do
+            local options = {
+                uri = "/llm/" .. backend .. "/v1/chat/completions",
+                backend_name = backend,
+                routes_json = routes_json,
+                bedrock_enabled = "true",
+            }
+            local result = run_policy(options)
+            assert.is_nil(options.bedrock_calls)
+            assert.is_nil(result.exit_status)
+            assert.matches("^http://", result.var.llm_target_url)
+        end
+    end)
+
+    it("signs Bedrock-routed requests last, after the rules engine", function()
+        local options = {
+            uri = "/llm/bedrock/v1/chat/completions",
+            backend_name = "bedrock",
+            routes_json = '{"bedrock":"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"}',
+            bedrock_enabled = "true",
+        }
+        local result = run_policy(options)
+        assert.equals(1, options.bedrock_calls)
+        assert.is_nil(result.exit_status)
+        assert.equals(
+            "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1/chat/completions",
+            result.var.llm_target_url
+        )
     end)
 
     it("returns 404 for an unknown LLM backend", function()
