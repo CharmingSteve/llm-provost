@@ -28,7 +28,7 @@ describe("bedrock credential caching", function()
         file:write("[default]\naws_access_key_id = AKIAFILEKEY1234\naws_secret_access_key = secret1\n")
         file:close()
 
-        os.getenv = function(name)
+        os.getenv = function(name) -- luacheck: ignore 122
             if name == "AWS_SHARED_CREDENTIALS_FILE" then return credential_file end
             if name == "AWS_ACCESS_KEY_ID" or name == "AWS_SECRET_ACCESS_KEY"
                 or name == "AWS_SESSION_TOKEN" or name == "AWS_PROFILE" then
@@ -61,7 +61,7 @@ describe("bedrock credential caching", function()
 
     after_each(function()
         os.remove(credential_file)
-        os.getenv = saved.os_getenv
+        os.getenv = saved.os_getenv -- luacheck: ignore 122
         _G.ngx = saved.ngx
         package.loaded["resty.aws"] = saved.aws
         package.loaded["resty.aws.request.sign"] = saved.sign
