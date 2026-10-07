@@ -102,6 +102,8 @@ def test_local_outputs_are_complete_json_lines() -> None:
 	assert "error_log /dev/stderr warn;" in nginx_config
 	assert "Match     provost.local.access" in output
 	assert "Match     provost.local.error" in output
+	assert "Match         provost.access*" in local_copy
+	assert "Match         provost.error*" in local_copy
 	assert "Match         provost.local.*" in local_copy
 	assert "Script        /fluent-bit/etc/lua/encode_record.lua" in local_copy
 	assert "@INCLUDE conf.d/filter-local-copy.conf" in fluent_config
