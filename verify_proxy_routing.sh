@@ -58,7 +58,8 @@ chat_status=$(request "$CHAT_HEADERS" "$CHAT_BODY" "$PROVOST_URL/llm/openwire/v1
     fail "Path A request could not reach the proxy"
 
 case "$chat_status" in
-    2??|4??|5??) pass "Path A chat request reached the proxy (HTTP $chat_status)" ;;
+    2??|3??|4??) pass "Path A chat request reached the proxy (HTTP $chat_status)" ;;
+    5??) fail "Path A returned server error HTTP $chat_status" ;;
     *) fail "Path A returned unexpected HTTP $chat_status" ;;
 esac
 

@@ -36,8 +36,8 @@ case "$url" in
     printf '%s' "${MCP_STATUS:-200}"
     ;;
   *)
-    printf '%s\n' '{"error":{"message":"mock backend unavailable"}}' > "$body_file"
-    printf '%s' '502'
+    printf '%s\n' '{"error":{"message":"mock backend response"}}' > "$body_file"
+    printf '%s' "${CHAT_STATUS:-401}"
     ;;
 esac
 if [ "${LEAK_AUTH:-false}" = true ]; then
@@ -58,6 +58,12 @@ teardown() {
   [[ "$output" == *"PASS: Path A"* ]]
   [[ "$output" == *"PASS: Path B"* ]]
   [[ "$output" == *"PASS: dual-path proxy routing verified"* ]]
+}
+
+@test "verify_proxy_routing.sh fails when the chat path returns a server error" {
+  run env CHAT_STATUS=500 PROVOST_URL=http://proxy.test sh "$TEST_REPO_ROOT/verify_proxy_routing.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL: Path A"* ]]
 }
 
 @test "verify_proxy_routing.sh fails when MCP forwarding fails" {
