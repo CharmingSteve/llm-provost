@@ -502,8 +502,17 @@ jobs:
           S3_KEY_PREFIX: "ci-run-${{ github.run_id }}/"
           VERIFY_S3_PREFIX: "ci-run-${{ github.run_id }}/"
         run: |
+          set -euo pipefail
+          # One per-run token shared by the proxy (PROVOST_TOKEN env, which the
+          # proxy prefers), the staged secrets file, and the verify probe.
+          PROVOST_TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::${PROVOST_TOKEN}"
+          export PROVOST_TOKEN
           eval "$(sh bootstrap.sh runner)"
           {
+            echo "PROVOST_TOKEN=$PROVOST_TOKEN"
+            # Route the openwire backend to the dummy upstream on the compose network.
+            echo 'LLM_ROUTES_JSON={"openwire":"http://mcp-server:8088/v1"}'
             echo "PROVOST_SECRETS_DIR=$PROVOST_SECRETS_DIR"
             echo "S3_BUCKET=ap-logs-863750994059-us-east-1-ci-test"
             echo "S3_KEY_PREFIX=ci-run-${GITHUB_RUN_ID}/"

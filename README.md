@@ -115,6 +115,7 @@ In this repository, example integration is shown in [config/librechat.yaml](conf
 
 - OpenWire traffic is routed through http://llm-provost:8000/llm/openwire/v1
 - Ollama traffic is routed through http://llm-provost:8000/llm/ollama/v1
+- vLLM traffic is routed through http://llm-provost:8000/llm/vllm/v1
 - Amazon Bedrock traffic is routed through http://llm-provost:8000/llm/bedrock/v1
 - MCP tool traffic is routed through /mcp/<server>
 
@@ -123,12 +124,22 @@ In this repository, example integration is shown in [config/librechat.yaml](conf
 Define every allowed LLM backend in `.env` as one JSON object. Backend names become the first path segment after `/llm/`, and each value is the upstream API base URL:
 
 ```sh
-LLM_ROUTES_JSON={"openwire":"http://host.docker.internal:3030/v1","ollama":"http://xps:11434/v1","bedrock":"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"}
+LLM_ROUTES_JSON={"openwire":"http://host.docker.internal:3030/v1","ollama":"http://xps:11434/v1","vllm":"http://vllm-host:8000/v1","bedrock":"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"}
 ```
 
 A client configured with `http://llm-provost:8000/llm/openwire/v1` therefore sends chat completions to the `openwire` URL. Add another backend by adding a unique lowercase name and an HTTP or HTTPS URL to the JSON object, then restart the proxy so OpenResty reloads its environment. Unknown backend names return HTTP 404; missing, malformed, or invalid routing configuration fails closed with HTTP 500. There is no single-backend fallback.
 
 Keep credentials in their existing environment variables, such as `OPENAI_API_KEY` and `OLLAMA_API_KEY`; do not put credentials in backend URLs. LLM requests continue through the same policy, Cognito identity extraction, four-layer ID logging, request/response audit capture, and authorization forwarding used by the original route. MCP routing remains configured separately in `mcp_routes.json`.
+
+### vLLM
+
+vLLM needs no dedicated code: it is a named backend like `openwire` and `ollama`. Add its OpenAI-compatible base URL to `LLM_ROUTES_JSON` and restart the proxy:
+
+```sh
+LLM_ROUTES_JSON={"vllm":"http://vllm-host:8000/v1"}
+```
+
+Then set the served model ID in the "vLLM" entry of [config/librechat.yaml](config/librechat.yaml) (replace `<your-vllm-model-id>`); `fetch: true` lists models from the server's `/v1/models`. Clients, or LibreChat, call `http://llm-provost:8000/llm/vllm/v1`. Until a `vllm` route exists the proxy returns HTTP 404 for that path. If your vLLM server was started with `--api-key`, pass the same key as the client API key; the `Authorization` header is forwarded unchanged. Requests pass through the same policy, identity extraction, audit capture and four-layer logging as every other backend, and are never SigV4-signed.
 
 ### Amazon Bedrock
 
@@ -140,7 +151,13 @@ BEDROCK_AWS_DEFAULT_REGION=us-east-1
 BEDROCK_MODEL=openai.gpt-oss-20b-1:0
 ```
 
-LibreChat sends Bedrock requests only to `http://llm-provost:8000/llm/bedrock/v1`. The proxy applies its rules and audit capture before resolving AWS credentials through environment variables, the read-only shared `~/.aws` configuration, ECS/EKS task credentials, or EC2 instance metadata credentials. It SigV4-signs the approved upstream request without recording credentials or signing headers. `fetch: true` uses the proxy's signed `ListFoundationModels` call to expose text-capable Bedrock models in LibreChat. Choose a model that supports Amazon Bedrock's OpenAI-compatible Chat Completions API; the default is verified against that API.
+LibreChat sends Bedrock requests only to `http://llm-provost:8000/llm/bedrock/v1`. The proxy applies its rules and audit capture first, then SigV4-signs the approved request to `bedrock-runtime.<region>.amazonaws.com` (`/openai/v1/...`) without recording credentials or signing headers. Choose a model that supports Amazon Bedrock's OpenAI-compatible Chat Completions API; the default is verified against that API.
+
+- **Region:** `BEDROCK_AWS_DEFAULT_REGION`, then `AWS_REGION`, then `us-east-1`. The signed host is derived from the region; the `bedrock` URL in `LLM_ROUTES_JSON` must still be present and valid.
+- **Credentials:** `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (and optional `AWS_SESSION_TOKEN`) in the proxy environment, otherwise the shared credentials file mounted read-only from `~/.aws` (change the host directory with `AWS_SHARED_CREDENTIALS_DIR`, pick a profile with `AWS_PROFILE`, default `default`). ECS/EKS task credentials and EC2 instance metadata are not resolved by the proxy yet. Credentials are cached for 5 minutes and dropped immediately when Bedrock returns 401/403.
+- **Model list:** `GET /llm/bedrock/v1/models` makes a signed `ListFoundationModels` call and returns text-output models, which LibreChat uses with `fetch: true`.
+- **Disabling:** with `BEDROCK_ENABLED` not `true`, Bedrock requests return HTTP 404.
+- **IAM:** grant the identity only `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` and `bedrock:ListFoundationModels`, scoped to the models you allow.
 
 ### Routing Tests
 
@@ -151,7 +168,7 @@ busted tests/lua/proxy_headers_spec.lua tests/lua/circuit_breaker_spec.lua
 bats tests/shell/test_entrypoint.bats tests/shell/test_verify_proxy_routing.bats
 ```
 
-For a running stack, `sh verify_proxy_routing.sh` probes `/llm/openwire/v1/chat/completions` and `/mcp/dummy`, verifies the four identity layers, and checks that the bearer token is absent from logs.
+For a running stack, `sh verify_proxy_routing.sh` probes `/llm/openwire/v1/chat/completions` and `/mcp/dummy`, verifies the four identity layers, and checks that the bearer token is absent from logs. Path A fails on any 5xx response, so the `openwire` route must be configured (`LLM_ROUTES_JSON`) and Path B authenticates with the token in `$PROVOST_SECRETS_DIR/provost_token`, which must equal the proxy's `PROVOST_TOKEN`. The CI integration job generates one random token per run and sets both, along with an `openwire` route to the dummy MCP server.
 
 ### LibreChat + Cognito Identity
 
