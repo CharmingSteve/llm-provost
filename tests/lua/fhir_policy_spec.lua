@@ -13,7 +13,10 @@ describe("FHIR outbound read-only boundary", function()
             os = { getenv = function() return base end },
         }, { __index = _G })
         package.loaded.outbound_identity = {
-            resolve = function() resolved = true end,
+            resolve = function(allow_last_known)
+                assert.is_false(allow_last_known)
+                resolved = true
+            end,
         }
         _G.ngx = {
             req = { get_method = function() return "GET" end },

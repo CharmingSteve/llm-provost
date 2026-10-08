@@ -1,6 +1,8 @@
 local cjson = require("cjson.safe")
 
-require("outbound_identity").resolve()
+-- WSO2 strips correlation headers; never attribute its REST calls to the
+-- globally last-seen user, which may belong to another concurrent request.
+require("outbound_identity").resolve(false)
 
 local function reject(status, message)
     ngx.status = status

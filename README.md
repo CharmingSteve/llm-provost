@@ -93,8 +93,13 @@ The write tools remain discoverable but cannot be executed through Provost.
 Both boundaries are governed and audited:
 `/mcp/fhir` → `fhir-mcp:8088/mcp` → `llm-provost:8081/fhir` →
 `FHIR_BASE_URL`. The REST boundary additionally rejects every method except
-GET/HEAD, and shares the existing outbound identity restoration and Fluent Bit
-audit trail, including denied writes.
+GET/HEAD, and shares the existing Fluent Bit audit trail, including denied writes.
+WSO2 does not forward request correlation headers on its REST calls: inbound
+MCP records retain the caller identity, but uncorrelated outbound FHIR records
+use `unknown` user/customer and `none` conversation, with their own request ID.
+They deliberately do not reuse the globally last-seen caller, which would
+misattribute concurrent traffic. End-to-end caller correlation requires
+upstream support for forwarding those headers.
 
 CI uses the real pinned WSO2 server with a tiny in-process synthetic REST mock
 inside the proxy test process (no additional data container), checking

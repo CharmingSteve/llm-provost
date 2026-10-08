@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -61,12 +62,12 @@ class FHIRMock(BaseHTTPRequestHandler):
         pass
 
 
-def request(url, body=None, method=None):
+def request(url, body=None, method=None, user="fhir-ci"):
     headers = {
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
         "X-Provost-Token": os.environ["PROVOST_TOKEN"],
-        "X-Cognito-User": "fhir-ci",
+        "X-Cognito-User": user,
         "X-Conversation-Id": CONVERSATION_ID,
     }
     data = None if body is None else json.dumps(body).encode()
@@ -78,14 +79,14 @@ def request(url, body=None, method=None):
         return error.code, json.loads(error.read())
 
 
-def rpc(method, params, request_id=1):
+def rpc(method, params, request_id=1, user="fhir-ci"):
     return request("http://127.0.0.1:8000/mcp/fhir", {
         "jsonrpc": "2.0", "id": request_id, "method": method, "params": params,
-    })
+    }, user=user)
 
 
-def tool(name, arguments, request_id=2):
-    return rpc("tools/call", {"name": name, "arguments": arguments}, request_id)
+def tool(name, arguments, request_id=2, user="fhir-ci"):
+    return rpc("tools/call", {"name": name, "arguments": arguments}, request_id, user)
 
 
 def tool_payload(response):
@@ -105,17 +106,18 @@ def patients(payload):
     return []
 
 
-def wait_for_audit(predicate):
+def wait_for_audit(predicate, start_line, inbound=False):
     for _ in range(60):
         records = []
-        for line in Path("/var/run/provost/llm-access.log").read_text().splitlines():
+        for line in Path("/var/run/provost/llm-access.log").read_text().splitlines()[start_line:]:
             try:
                 records.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
-        if any(record.get("conversation_id") == CONVERSATION_ID
-               and record.get("user_id") == "fhir-ci"
-               and predicate(record) for record in records):
+        if any(predicate(record) and (not inbound or (
+            record.get("conversation_id") == CONVERSATION_ID
+            and record.get("user_id") == "fhir-ci"
+        )) for record in records):
             return
         time.sleep(0.5)
     raise AssertionError("Expected FHIR audit entry not found")
@@ -123,6 +125,7 @@ def wait_for_audit(predicate):
 
 def main():
     live = "--live" in sys.argv
+    start_line = len(Path("/var/run/provost/llm-access.log").read_text().splitlines())
     server = None
     if not live:
         server = ThreadingHTTPServer(("127.0.0.1", 18089), FHIRMock)
@@ -161,6 +164,21 @@ def main():
                        for _, path in FHIRMock.calls), FHIRMock.calls
             assert any(path.startswith("/baseR4/Patient?") and "_count=1" in path
                        for _, path in FHIRMock.calls), FHIRMock.calls
+            def concurrent_search(index):
+                status, response = tool("search", {
+                    "type": "Patient",
+                    "searchParam": {"_count": "1", "_id": CONVERSATION_ID + "-" + str(index)},
+                }, user="fhir-ci-" + str(index))
+                assert status == 200 and patients(tool_payload(response)) == [PATIENT], response
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                list(pool.map(concurrent_search, range(8)))
+            for index in range(8):
+                marker = CONVERSATION_ID + "-" + str(index)
+                wait_for_audit(lambda record:
+                               marker in record.get("request", "")
+                               and int(record.get("status", 0)) == 200
+                               and record.get("user_id") == "unknown", start_line)
             calls_before = list(FHIRMock.calls)
 
         for name in ("create", "update", "delete", "unapproved_tool"):
@@ -178,14 +196,17 @@ def main():
 
         wait_for_audit(lambda record:
                        record.get("request", "").startswith("GET /fhir/Patient?")
-                       and int(record.get("status", 0)) == 200)
+                       and int(record.get("status", 0)) == 200
+                       and record.get("user_id") == "unknown"
+                       and record.get("customer_id") == "unknown"
+                       and record.get("conversation_id") == "none", start_line)
         wait_for_audit(lambda record:
                        "/mcp/fhir" in record.get("request", "")
                        and int(record.get("status", 0)) == 403
-                       and "create" in record.get("request_body", ""))
+                       and "create" in record.get("request_body", ""), start_line, inbound=True)
         wait_for_audit(lambda record:
                        record.get("request", "").startswith("DELETE /fhir/Patient ")
-                       and int(record.get("status", 0)) == 403)
+                       and int(record.get("status", 0)) == 403, start_line)
         print("FHIR initialize/list/read, write denials, REST routing and audit passed")
     finally:
         if server:
