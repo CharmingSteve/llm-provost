@@ -23,6 +23,7 @@ describe("FHIR outbound read-only boundary", function()
             var = { request_uri = "/fhir/Patient?_count=1&name=A%20B" },
             header = {},
             HTTP_FORBIDDEN = 403,
+            HTTP_BAD_REQUEST = 400,
             HTTP_INTERNAL_SERVER_ERROR = 500,
             say = function(value) output = value end,
             exit = function(status) return status end,
@@ -74,6 +75,18 @@ describe("FHIR outbound read-only boundary", function()
             base = invalid
             assert.equals(500, run())
             assert.is_nil(ngx.var.fhir_target_url)
+        end
+    end)
+
+    it("rejects raw URIs without an exact FHIR prefix boundary", function()
+        for _, request_uri in ipairs({
+            "/fhir.attacker.example/../fhir/Patient",
+            "/%66hir/Patient",
+        }) do
+            ngx.var.request_uri = request_uri
+            assert.equals(400, run())
+            assert.is_nil(ngx.var.fhir_target_url)
+            assert.truthy(output:find("Invalid FHIR request URI", 1, true))
         end
     end)
 end)

@@ -92,7 +92,7 @@ function _M.resolve(allow_last_known)
 end
 
 -- Buffered response capture so the hop's access log carries the full body.
-function _M.capture_response(chunk, eof)
+function _M.capture_response(chunk, eof, discover_alpaca_account)
     local MAX_CAPTURE_BYTES = 65536
     local buffered = ngx.ctx.buffered or ""
     if #buffered < MAX_CAPTURE_BYTES and chunk and #chunk > 0 then
@@ -108,7 +108,7 @@ function _M.capture_response(chunk, eof)
         ngx.var.resp_body = buffered
 
         -- Cache discovered Alpaca account_id from successful account payloads.
-        if ngx.status >= 200 and ngx.status < 300 then
+        if discover_alpaca_account ~= false and ngx.status >= 200 and ngx.status < 300 then
             local payload = cjson.decode(buffered)
             local discovered = payload and (payload.id or payload.account_id)
             if type(discovered) == "string"

@@ -25,7 +25,14 @@ if not authority or authority:find("@", 1, true) or path:find("[?#%s]") then
 end
 
 -- Preserve the escaped path and query without allowing callers to change host.
-local suffix = ngx.var.request_uri:gsub("^/fhir", "", 1)
+local request_uri = ngx.var.request_uri or ""
+local boundary = request_uri:sub(6, 6)
+if request_uri:sub(1, 5) ~= "/fhir"
+   or (boundary ~= "" and boundary ~= "/" and boundary ~= "?") then
+    return reject(ngx.HTTP_BAD_REQUEST, "Invalid FHIR request URI")
+end
+
+local suffix = request_uri:sub(6)
 if suffix == "" or suffix:sub(1, 1) == "?" then
     suffix = "/" .. suffix
 end

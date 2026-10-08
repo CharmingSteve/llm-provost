@@ -19,12 +19,17 @@ describe("FHIR outbound audit identity isolation", function()
         }
         _G.ngx = {
             var = { request_id = "outbound-request" },
+            ctx = {},
+            status = 200,
             req = {
                 get_headers = function() return {} end,
                 get_body_data = function() return nil end,
                 set_header = function() end,
             },
-            shared = { provost_ctx = { get = function(_, key) return values[key] end } },
+            shared = { provost_ctx = {
+                get = function(_, key) return values[key] end,
+                set = function(_, key, value) values[key] = value end,
+            } },
         }
     end)
 
@@ -53,5 +58,17 @@ describe("FHIR outbound audit identity isolation", function()
         identity.resolve()
         assert.equals("another-request", ngx.var.provost_req_id)
         assert.equals("another-user", ngx.var.provost_user_id)
+    end)
+
+    it("captures FHIR response bodies without discovering Alpaca accounts", function()
+        local body = '{"id":"fhir-account","currency":"USD"}'
+        identity.capture_response(body, true, false)
+        assert.equals(body, ngx.var.resp_body)
+        assert.is_nil(ngx.shared.provost_ctx:get("alpaca:account_id"))
+    end)
+
+    it("continues discovering Alpaca accounts when enabled by default", function()
+        identity.capture_response('{"id":"alpaca-account","currency":"USD"}', true)
+        assert.equals("alpaca-account", ngx.shared.provost_ctx:get("alpaca:account_id"))
     end)
 end)

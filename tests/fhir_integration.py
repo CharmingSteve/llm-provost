@@ -92,7 +92,8 @@ def tool(name, arguments, request_id=2, user="fhir-ci"):
 def tool_payload(response):
     result = response["result"]
     assert not result.get("isError"), response
-    return result["structuredContent"]["result"]
+    structured = result["structuredContent"]
+    return structured.get("result", structured)
 
 
 def patients(payload):

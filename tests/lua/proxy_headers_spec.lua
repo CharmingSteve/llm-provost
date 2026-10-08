@@ -42,6 +42,7 @@ describe("Phase 2 routing and audit configuration", function()
         assert.truthy(conf:find("env FHIR_BASE_URL;", 1, true))
         assert.truthy(conf:find("access_by_lua_file /etc/nginx/lua/fhir_policy.lua;", 1, true))
         assert.truthy(conf:find("proxy_pass $fhir_target_url;", 1, true))
+        assert.truthy(conf:find('require("outbound_identity").capture_response(ngx.arg[1], ngx.arg[2], false)', 1, true))
     end)
 
     it("does not apply the Alpaca rate-budget header filter to FHIR", function()
