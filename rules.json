@@ -83,6 +83,22 @@
     }
   },
   "mcp_servers": {
+    "fhir": {
+      "tool_allowlist": {
+        "enabled": true,
+        "description": "FHIR is read-only: only search, read, capabilities and user context are permitted.",
+        "params": {
+          "tools": ["search", "read", "get_capabilities", "get_user"]
+        }
+      },
+      "tool_blocklist": {
+        "enabled": true,
+        "description": "FHIR writes are forbidden.",
+        "params": {
+          "tools": ["create", "update", "delete"]
+        }
+      }
+    },
     "alpaca": {
       "tool_allowlist": {
         "enabled": false,

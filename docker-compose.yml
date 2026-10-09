@@ -59,6 +59,33 @@ services:
     pids_limit: 256
     restart: unless-stopped
 
+  fhir-mcp:
+    # Upstream publishes an amd64 image; pull it, never build it locally.
+    image: ${FHIR_IMAGE}@${FHIR_IMAGE_TAG}
+    platform: linux/amd64
+    pull_policy: if_not_present
+    container_name: fhir-mcp
+    environment:
+      FHIR_SERVER_BASE_URL: "http://llm-provost:8081/fhir"
+      FHIR_SERVER_DISABLE_AUTHORIZATION: "True"
+      FHIR_MCP_HOST: "0.0.0.0"
+      FHIR_MCP_PORT: "8088"
+      TZ: ${TZ:-Asia/Jerusalem}
+    expose:
+      - "8088"
+    networks:
+      - mcp_internal
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    pids_limit: 256
+    restart: unless-stopped
+
   fluent-bit:
     image: ${FLUENT_BIT_IMAGE}
     pull_policy: if_not_present
@@ -109,6 +136,8 @@ services:
         condition: service_started
       alpaca-mcp:
         condition: service_started
+      fhir-mcp:
+        condition: service_started
       fluent-bit:
         condition: service_healthy
     ports:
@@ -130,6 +159,7 @@ services:
       LLM_ROUTES_JSON: ${LLM_ROUTES_JSON:-}
       AUDIT_LOG_MODE: ${AUDIT_LOG_MODE:-compact}
       MCP_ROUTING_TABLE_PATH: /etc/nginx/mcp_routes/mcp_routes.json
+      FHIR_BASE_URL: ${FHIR_BASE_URL:-http://hapi.fhir.org/baseR4}
       PROVOST_TOKEN: ${PROVOST_TOKEN:-}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}

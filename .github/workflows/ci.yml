@@ -173,10 +173,17 @@ jobs:
     if: always()
     runs-on: ubuntu-24.04-arm
     needs: [test-lua, test-shell, build-secure-push-test]
+    env:
+      FHIR_BASE_URL: http://127.0.0.1:18089/baseR4
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Enable amd64 upstream FHIR image on the arm64 runner
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+        with:
+          platforms: amd64
 
       - name: Fetch latest workflow-updated branch state
         env:
@@ -231,8 +238,19 @@ jobs:
           docker compose --env-file .env.versions ps
           [ "$(docker inspect -f '{{.State.Status}}' mcp-server)" = "running" ]
           [ "$(docker inspect -f '{{.State.Status}}' alpaca-mcp)" = "running" ]
+          [ "$(docker inspect -f '{{.State.Status}}' fhir-mcp)" = "running" ]
           [ "$(docker inspect -f '{{.State.Status}}' llm-provost)" = "running" ]
           [ "$(docker inspect -f '{{.State.Health.Status}}' fluent-bit)" = "healthy" ]
+      - name: Test FHIR MCP routing, read-only governance and both audit boundaries
+        run: docker exec -i llm-provost python3 - < tests/fhir_integration.py
+      - name: Optional public HAPI FHIR read test
+        if: vars.FHIR_LIVE_TESTS == 'true'
+        env:
+          FHIR_BASE_URL: http://hapi.fhir.org/baseR4
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.versions up -d --no-deps --force-recreate llm-provost
+          docker exec -i llm-provost python3 - --live < tests/fhir_integration.py
       - name: Tear down compose stack
         if: always()
         run: docker compose --env-file .env.versions down -v --remove-orphans
@@ -456,6 +474,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref || github.ref_name }}
+      - name: Enable amd64 upstream FHIR image on the arm64 runner
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+        with:
+          platforms: amd64
       - name: Fetch latest workflow-updated branch state
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}

@@ -61,6 +61,53 @@ This branch includes Agent Provost imports for governed Alpaca MCP usage:
 - Runtime outbound identity context restoration (`lua/outbound_identity.lua`) so audit logs preserve provost identity even when upstream headers are dropped.
 - Alpaca startup behavior aligned with Agent Provost entrypoint/runtime expectations.
 
+## FHIR: read-only synthetic patient data
+
+The WSO2 `fhir-mcp` service is pulled from GHCR and digest-pinned in
+`.env.versions`; it is **not built** here. Its native command already serves
+stateless Streamable HTTP, so no entrypoint wrapper is needed. It runs as
+`10001:10001` with a read-only filesystem and the same isolation controls as
+Alpaca, on `mcp_internal` only. The pinned upstream image is **amd64-only**;
+ARM hosts need Docker's amd64 emulation (Docker Desktop includes it; CI enables
+QEMU explicitly).
+
+The default external FHIR R4 backend is `http://hapi.fhir.org/baseR4`;
+start with `docker compose --env-file .env.versions up -d`.
+To override it, set `FHIR_BASE_URL` in `.env` and run
+`docker compose --env-file .env.versions --env-file .env up -d`
+(or `scripts/provost-compose.sh up`, which loads both files).
+No HAPI/data container is added.
+Use **synthetic data only**: the public sandbox is shared and unauthenticated,
+and the existing audit pipeline records request/response bodies. Prefer HTTPS
+when configuring another backend.
+
+Connect your MCP client to `http://localhost:8000/mcp/fhir` with
+`X-Provost-Token` (or bearer authentication), as for `/mcp/alpaca`. Initialize,
+list tools, then call `get_capabilities` with `{"type":"Patient"}` and `search`
+with `{"type":"Patient","searchParam":{"_count":"1"}}`.
+`search`, `read`, `get_capabilities`, and `get_user` are allowed;
+`create`, `update`, `delete`, and unknown tools receive HTTP 403
+(`tool not in allowlist: <name>`). `get_user` is normally empty without OAuth.
+The write tools remain discoverable but cannot be executed through Provost.
+
+Both boundaries are governed and audited:
+`/mcp/fhir` → `fhir-mcp:8088/mcp` → `llm-provost:8081/fhir` →
+`FHIR_BASE_URL`. The REST boundary additionally rejects every method except
+GET/HEAD, and shares the existing Fluent Bit audit trail, including denied writes.
+WSO2 does not forward request correlation headers on its REST calls: inbound
+MCP records retain the caller identity, but uncorrelated outbound FHIR records
+use `unknown` user/customer and `none` conversation, with their own request ID.
+They deliberately do not reuse the globally last-seen caller, which would
+misattribute concurrent traffic. End-to-end caller correlation requires
+upstream support for forwarding those headers.
+
+CI uses the real pinned WSO2 server with a tiny in-process synthetic REST mock
+inside the proxy test process (no additional data container), checking
+initialize/list/search/read, denied writes, outbound routing, and audit records.
+Set the GitHub repository variable `FHIR_LIVE_TESTS=true` to also test the public
+HAPI sandbox; this is opt-in because shared public data and availability are
+not deterministic.
+
 ## Architecture
 
 Two enforcement boundaries are active:

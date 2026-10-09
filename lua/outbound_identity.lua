@@ -48,7 +48,7 @@ function _M.store(request_id, user_id, customer_id, conversation_id)
     end
 end
 
-function _M.resolve()
+function _M.resolve(allow_last_known)
     local headers = ngx.req.get_headers() or {}
     local ctx_store = ngx.shared.provost_ctx
 
@@ -73,7 +73,7 @@ function _M.resolve()
         end
     end
 
-    if ctx_store and not user_id then
+    if allow_last_known ~= false and ctx_store and not user_id then
         request_id = request_id or nonempty(ctx_store:get("last:request_id"))
         user_id = nonempty(ctx_store:get("last:user_id"))
         customer_id = customer_id or nonempty(ctx_store:get("last:customer_id"))
@@ -85,14 +85,14 @@ function _M.resolve()
         or (ngx.now() * 1000000 .. "-" .. math.random(100000, 999999))
 
     ngx.var.provost_req_id = request_id
-    ngx.var.provost_user_id = user_id or "steve"
-    ngx.var.provost_customer_id = customer_id or "craig"
+    ngx.var.provost_user_id = user_id or (allow_last_known == false and "unknown" or "steve")
+    ngx.var.provost_customer_id = customer_id or (allow_last_known == false and "unknown" or "craig")
     ngx.var.provost_conversation_id = conversation_id or "none"
     ngx.req.set_header("X-Provost-Request-Id", request_id)
 end
 
 -- Buffered response capture so the hop's access log carries the full body.
-function _M.capture_response(chunk, eof)
+function _M.capture_response(chunk, eof, discover_alpaca_account)
     local MAX_CAPTURE_BYTES = 65536
     local buffered = ngx.ctx.buffered or ""
     if #buffered < MAX_CAPTURE_BYTES and chunk and #chunk > 0 then
@@ -108,7 +108,7 @@ function _M.capture_response(chunk, eof)
         ngx.var.resp_body = buffered
 
         -- Cache discovered Alpaca account_id from successful account payloads.
-        if ngx.status >= 200 and ngx.status < 300 then
+        if discover_alpaca_account ~= false and ngx.status >= 200 and ngx.status < 300 then
             local payload = cjson.decode(buffered)
             local discovered = payload and (payload.id or payload.account_id)
             if type(discovered) == "string"
