@@ -74,10 +74,12 @@
     "params": {
       "max_tokens": 4096,
       "pii_block": [
-        "us_ssn",
         "aws_access_key",
         "private_key_block",
         "github_token"
+      ],
+      "pii_redact": [
+        "us_ssn"
       ],
       "pii_patterns": {}
     }
