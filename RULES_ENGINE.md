@@ -134,6 +134,13 @@ These settings define audit expectations for every request.
 }
 ```
 
+### LLM prompt PII handling
+
+`llm_rules.params.pii_block` hard-blocks matching prompts with HTTP 403. Names
+in the optional `llm_rules.params.pii_redact` list are masked before an LLM
+request is forwarded; the pre-redaction body is preserved in the
+`req_body_original` access-log field when a replacement occurs.
+
 ---
 
 ## Complete Example

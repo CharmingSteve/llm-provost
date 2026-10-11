@@ -98,4 +98,111 @@ describe("rules_engine MCP governance", function()
         assert.is_true(allowed)
         assert.equals("chat path allowed", reason)
     end)
+
+    it("redacts configured SSNs and returns the forwarded body", function()
+        local rules = {
+            llm_rules = {
+                enabled = true,
+                params = {
+                    pii_block = { "aws_access_key", "private_key_block", "github_token" },
+                    pii_redact = { "us_ssn" },
+                },
+            },
+        }
+        local request_body = '{"messages":[{"role":"tool","content":"SSN 999-70-1676"}]}'
+        local allowed, reason, redacted_body = engine.check_request(
+            "POST",
+            "/v1/chat/completions",
+            request_body,
+            rules,
+            { is_mcp_path = false }
+        )
+
+        assert.is_true(allowed)
+        assert.equals("chat path allowed", reason)
+        assert.equals(
+            '{"messages":[{"role":"tool","content":"SSN ***-**-****"}]}',
+            redacted_body
+        )
+    end)
+
+    it("continues to block AWS access keys in chat requests", function()
+        local rules = {
+            llm_rules = {
+                enabled = true,
+                params = {
+                    pii_block = { "aws_access_key" },
+                    pii_redact = { "us_ssn" },
+                },
+            },
+        }
+        local allowed, reason = engine.check_request(
+            "POST",
+            "/v1/chat/completions",
+            '{"messages":[{"role":"user","content":"AKIAIOSFODNN7EXAMPLE"}]}',
+            rules,
+            { is_mcp_path = false }
+        )
+
+        assert.is_false(allowed)
+        assert.truthy(reason:find("aws_access_key", 1, true))
+    end)
+
+    it("blocks a built-in PII pattern enabled for both blocking and redaction", function()
+        local rules = {
+            llm_rules = {
+                enabled = true,
+                params = {
+                    pii_block = { "us_ssn" },
+                    pii_redact = { "us_ssn" },
+                },
+            },
+        }
+        local allowed, reason = engine.check_request(
+            "POST",
+            "/v1/chat/completions",
+            '{"messages":[{"role":"user","content":"999-70-1676"}]}',
+            rules,
+            { is_mcp_path = false }
+        )
+
+        assert.is_false(allowed)
+        assert.truthy(reason:find("us_ssn", 1, true))
+    end)
+
+    it("checks custom blocking patterns against the original body before redaction", function()
+        local rules = {
+            llm_rules = {
+                enabled = true,
+                params = {
+                    pii_patterns = { sensitive_number = "%d%d%d%-%d%d%-%d%d%d%d" },
+                    pii_redact = { "us_ssn" },
+                },
+            },
+        }
+        local allowed, reason = engine.check_request(
+            "POST",
+            "/v1/chat/completions",
+            '{"messages":[{"role":"user","content":"999-70-1676"}]}',
+            rules,
+            { is_mcp_path = false }
+        )
+
+        assert.is_false(allowed)
+        assert.truthy(reason:find("sensitive_number", 1, true))
+    end)
+
+    it("returns an unchanged chat body when no configured PII is present", function()
+        local request_body = '{"messages":[{"role":"user","content":"hello"}]}'
+        local allowed, _, returned_body = engine.check_request(
+            "POST",
+            "/v1/chat/completions",
+            request_body,
+            { llm_rules = { enabled = true, params = { pii_redact = { "us_ssn" } } } },
+            { is_mcp_path = false }
+        )
+
+        assert.is_true(allowed)
+        assert.equals(request_body, returned_body)
+    end)
 end)

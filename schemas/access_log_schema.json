@@ -15,6 +15,7 @@
     "customer_id",
     "conversation_id",
     "request_body",
+    "req_body_original",
     "resp_body",
     "pri",
     "host",
@@ -60,6 +61,9 @@
       "type": "string"
     },
     "request_body": {
+      "type": "string"
+    },
+    "req_body_original": {
       "type": "string"
     },
     "resp_body": {

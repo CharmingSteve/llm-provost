@@ -276,7 +276,7 @@ if not is_mcp_path then
     end
 end
 
-local allowed, reason = rules_engine.check_request(
+local allowed, reason, redacted_body = rules_engine.check_request(
     ngx.req.get_method(),
     uri,
     body,
@@ -293,6 +293,22 @@ local allowed, reason = rules_engine.check_request(
 
 if not allowed then
     return reject(reason)
+end
+
+if not is_mcp_path then
+    redacted_body = type(redacted_body) == "string" and redacted_body or body
+    if redacted_body ~= body then
+        ngx.req.set_body_data(redacted_body)
+        ngx.var.req_body_original = audit_body.compact_request(
+            body,
+            os.getenv("AUDIT_LOG_MODE") or "compact"
+        )
+    end
+    body = redacted_body
+    ngx.var.req_body = audit_body.compact_request(
+        body,
+        os.getenv("AUDIT_LOG_MODE") or "compact"
+    )
 end
 
 if not is_mcp_path and ngx.var.backend_name == "bedrock" then

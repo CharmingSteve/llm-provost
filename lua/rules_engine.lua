@@ -151,9 +151,9 @@ local function check_time_rules(rules, tool_name)
     return true
 end
 
--- Built-in PII detection patterns for LLM chat prompts. Each entry can be
--- enabled via llm_rules.params.pii_block in rules.json; custom Lua patterns
--- can be added via llm_rules.params.pii_patterns.
+-- Built-in PII patterns for LLM chat prompts. Entries can be enabled via
+-- llm_rules.params.pii_block or pii_redact; custom Lua patterns can be added
+-- via llm_rules.params.pii_patterns.
 local BUILTIN_PII_PATTERNS = {
     us_ssn = "%f[%d]%d%d%d%-%d%d%-%d%d%d%d%f[%D]",
     aws_access_key = "AKIA[%u%d][%u%d][%u%d][%u%d][%u%d][%u%d][%u%d][%u%d]"
@@ -162,16 +162,20 @@ local BUILTIN_PII_PATTERNS = {
     github_token = "gh[pousr]_%w%w%w%w%w%w%w%w%w%w%w%w%w%w%w%w",
 }
 
+local MASKS = {
+    us_ssn = "***-**-****",
+}
+
 local function check_llm_pii(params, body)
     if type(body) ~= "string" or body == "" then
-        return true
+        return true, nil, body
     end
 
     if type(params.pii_block) == "table" then
         for _, name in ipairs(params.pii_block) do
             local pattern = BUILTIN_PII_PATTERNS[name]
             if pattern and body:find(pattern) then
-                return false, "PII filter blocked prompt: " .. name .. " detected"
+                return false, "PII filter blocked prompt: " .. name .. " detected", body
             end
         end
     end
@@ -183,36 +187,46 @@ local function check_llm_pii(params, body)
                     return body:find(pattern)
                 end) and body:find(pattern)
                 if matched then
-                    return false, "PII filter blocked prompt: " .. tostring(name) .. " detected"
+                    return false, "PII filter blocked prompt: " .. tostring(name) .. " detected", body
                 end
             end
         end
     end
 
-    return true
+    local redacted_body = body
+    if type(params.pii_redact) == "table" then
+        for _, name in ipairs(params.pii_redact) do
+            local pattern = BUILTIN_PII_PATTERNS[name]
+            if pattern then
+                redacted_body = redacted_body:gsub(pattern, MASKS[name] or "****")
+            end
+        end
+    end
+
+    return true, nil, redacted_body
 end
 
 local function check_llm_request(rules, body)
     local params = enabled_params(rules.llm_rules)
     if not params then
-        return true, "chat path allowed"
+        return true, "chat path allowed", body
     end
 
-    local allowed, reason = check_llm_pii(params, body)
+    local allowed, reason, redacted_body = check_llm_pii(params, body)
     if not allowed then
-        return false, reason
+        return false, reason, redacted_body
     end
 
     local maximum = tonumber(params.max_tokens)
     if maximum then
-        local parsed = cjson.decode(body or "")
+        local parsed = cjson.decode(redacted_body or "")
         local requested = type(parsed) == "table" and tonumber(parsed.max_tokens)
         if requested and requested > maximum then
-            return false, "token cap exceeded: requested " .. requested .. ", max " .. maximum
+            return false, "token cap exceeded: requested " .. requested .. ", max " .. maximum, redacted_body
         end
     end
 
-    return true, "chat path allowed"
+    return true, "chat path allowed", redacted_body
 end
 
 -- Generic MCP rule keys that a per-server rule set may override.

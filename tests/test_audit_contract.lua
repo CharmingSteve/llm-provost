@@ -55,6 +55,7 @@ describe("Phase 4 audit contract", function()
         "customer_id",
         "conversation_id",
         "request_body",
+        "req_body_original",
         "resp_body",
     }
     local expected_error_fields = {
@@ -108,8 +109,10 @@ describe("Phase 4 audit contract", function()
 
     it("captures request and response bodies with incremental streaming", function()
         assert.truthy(access_block:find('"request_body":"$req_body"', 1, true))
+        assert.truthy(access_block:find('"req_body_original":"$req_body_original"', 1, true))
         assert.truthy(access_block:find('"resp_body":"$resp_body"', 1, true))
         assert.truthy(config:find('set $req_body "";', 1, true))
+        assert.truthy(config:find('set $req_body_original "";', 1, true))
         assert.truthy(config:find('set $resp_body "";', 1, true))
         local location_start = assert(config:find(
             "location ~ ^/llm/(?<backend_name>[^/]+)(/.*)$ {",

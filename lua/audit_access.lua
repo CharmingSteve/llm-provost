@@ -21,6 +21,7 @@ local function base_record(resp_body)
         customer_id = text(ngx.var.provost_customer_id),
         conversation_id = text(ngx.var.provost_conversation_id),
         request_body = text(ngx.var.req_body),
+        req_body_original = text(ngx.var.req_body_original),
         resp_body = resp_body,
     }
 end
@@ -55,6 +56,7 @@ function _M.emit_chunk(resp_body, chunk)
         customer_id = record.customer_id,
         conversation_id = record.conversation_id,
         request_body = chunk == 1 and record.request_body or "",
+        req_body_original = chunk == 1 and record.req_body_original or "",
         resp_body = record.resp_body,
         pri = "190",
         host = text(ngx.var.hostname ~= "" and ngx.var.hostname or "llm-provost"),
