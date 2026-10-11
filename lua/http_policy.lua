@@ -276,7 +276,6 @@ if not is_mcp_path then
     end
 end
 
-local allowed, reason = rules_engine.check_request(
 local allowed, reason, redacted_body = rules_engine.check_request(
     ngx.req.get_method(),
     uri,

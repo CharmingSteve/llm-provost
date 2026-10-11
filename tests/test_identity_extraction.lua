@@ -1,6 +1,7 @@
 package.path = package.path .. ";lua/?.lua"
 
 local cjson = require("cjson.safe")
+local actual_rules_engine = require("rules_engine")
 
 local function run_policy(options)
     local loaded_audit_error = package.loaded.audit_error
@@ -38,11 +39,7 @@ local function run_policy(options)
         }
     end
     package.preload.rules_engine = function()
-        return {
-            check_request = function()
-                return true
-            end,
-        }
+        return actual_rules_engine
     end
 
     local headers = options.headers or {}
@@ -80,6 +77,9 @@ local function run_policy(options)
             get_body_file = function()
                 return options.body_file
             end,
+            set_body_data = function(data)
+                options.forwarded_body = data
+            end,
             get_method = function()
                 return "POST"
             end,
@@ -87,7 +87,7 @@ local function run_policy(options)
         shared = {
             rules = {
                 get = function()
-                    return nil
+                    return options.rules_json
                 end,
             },
         },
@@ -229,6 +229,90 @@ describe("four-layer identity extraction", function()
             body = '{"message":"hello"}',
         })
         assert.equals('{"message":"hello"}', result.var.req_body)
+    end)
+
+    it("forwards redacted chat bytes and logs the original SSN for CI verification", function()
+        local body = '{"messages":[{"role":"tool","content":"Patient SSN 999-70-1676"}]}'
+        local options = {
+            uri = "/llm/openwire/v1/chat/completions",
+            body = body,
+            rules_json = assert(cjson.encode({
+                llm_rules = {
+                    enabled = true,
+                    params = {
+                        pii_block = { "aws_access_key", "private_key_block", "github_token" },
+                        pii_redact = { "us_ssn" },
+                    },
+                },
+            })),
+        }
+        local result = run_policy(options)
+        local masked = body:gsub("999%-70%-1676", "***-**-****")
+
+        assert.is_nil(result.exit_status)
+        assert.equals(masked, options.forwarded_body)
+        assert.truthy(result.var.req_body:find("***-**-****", 1, true))
+        assert.is_nil(result.var.req_body:find("999-70-1676", 1, true))
+        assert.truthy(result.var.req_body_original:find("999-70-1676", 1, true))
+        io.stdout:write(
+            "PII redaction CI proof: forwarded and logged body contains ***-**-****; "
+                .. "original retained in audit field\n"
+        )
+    end)
+
+    it("keeps AWS access keys blocked on the chat path", function()
+        local result = run_policy({
+            uri = "/llm/openwire/v1/chat/completions",
+            body = '{"messages":[{"role":"user","content":"AKIAIOSFODNN7EXAMPLE"}]}',
+            rules_json = assert(cjson.encode({
+                llm_rules = {
+                    enabled = true,
+                    params = { pii_block = { "aws_access_key" } },
+                },
+            })),
+        })
+
+        assert.equals(403, result.exit_status)
+        assert.is_nil(result.req_body)
+    end)
+
+    it("does not set an original body or change a chat request without PII", function()
+        local body = '{"messages":[{"role":"user","content":"hello"}]}'
+        local options = {
+            uri = "/llm/openwire/v1/chat/completions",
+            body = body,
+            rules_json = assert(cjson.encode({
+                llm_rules = {
+                    enabled = true,
+                    params = { pii_redact = { "us_ssn" } },
+                },
+            })),
+        }
+        local result = run_policy(options)
+
+        assert.equals(body, result.var.req_body)
+        assert.is_nil(result.var.req_body_original)
+        assert.is_nil(options.forwarded_body)
+    end)
+
+    it("leaves MCP request bodies unchanged when they contain an SSN", function()
+        local body = '{"jsonrpc":"2.0","method":"notification","result":"999-70-1676"}'
+        local options = {
+            uri = "/mcp/fhir",
+            body = body,
+            rules_json = assert(cjson.encode({
+                llm_rules = {
+                    enabled = true,
+                    params = { pii_redact = { "us_ssn" } },
+                },
+            })),
+        }
+        local result = run_policy(options)
+
+        assert.equals(body, result.ctx.request_body)
+        assert.equals(body, result.var.req_body)
+        assert.is_nil(options.forwarded_body)
+        assert.is_nil(result.var.req_body_original)
     end)
 
     it("builds an upstream URL from the named backend and request suffix", function()

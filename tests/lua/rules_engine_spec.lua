@@ -98,4 +98,64 @@ describe("rules_engine MCP governance", function()
         assert.is_true(allowed)
         assert.equals("chat path allowed", reason)
     end)
+
+    it("redacts configured SSNs and returns the forwarded body", function()
+        local rules = {
+            llm_rules = {
+                enabled = true,
+                params = {
+                    pii_block = { "aws_access_key", "private_key_block", "github_token" },
+                    pii_redact = { "us_ssn" },
+                },
+            },
+        }
+        local body = '{"messages":[{"role":"tool","content":"SSN 999-70-1676"}]}'
+        local allowed, reason, redacted_body = engine.check_request(
+            "POST",
+            "/v1/chat/completions",
+            body,
+            rules,
+            { is_mcp_path = false }
+        )
+
+        assert.is_true(allowed)
+        assert.equals("chat path allowed", reason)
+        assert.equals('{"messages":[{"role":"tool","content":"SSN ***-**-****"}]}', redacted_body)
+    end)
+
+    it("continues to block AWS access keys in chat requests", function()
+        local rules = {
+            llm_rules = {
+                enabled = true,
+                params = {
+                    pii_block = { "aws_access_key" },
+                    pii_redact = { "us_ssn" },
+                },
+            },
+        }
+        local allowed, reason = engine.check_request(
+            "POST",
+            "/v1/chat/completions",
+            '{"messages":[{"role":"user","content":"AKIAIOSFODNN7EXAMPLE"}]}',
+            rules,
+            { is_mcp_path = false }
+        )
+
+        assert.is_false(allowed)
+        assert.truthy(reason:find("aws_access_key", 1, true))
+    end)
+
+    it("returns an unchanged chat body when no configured PII is present", function()
+        local body = '{"messages":[{"role":"user","content":"hello"}]}'
+        local allowed, _, returned_body = engine.check_request(
+            "POST",
+            "/v1/chat/completions",
+            body,
+            { llm_rules = { enabled = true, params = { pii_redact = { "us_ssn" } } } },
+            { is_mcp_path = false }
+        )
+
+        assert.is_true(allowed)
+        assert.equals(body, returned_body)
+    end)
 end)
