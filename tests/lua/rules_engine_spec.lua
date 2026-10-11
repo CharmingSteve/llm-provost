@@ -148,6 +148,50 @@ describe("rules_engine MCP governance", function()
         assert.truthy(reason:find("aws_access_key", 1, true))
     end)
 
+    it("blocks a built-in PII pattern enabled for both blocking and redaction", function()
+        local rules = {
+            llm_rules = {
+                enabled = true,
+                params = {
+                    pii_block = { "us_ssn" },
+                    pii_redact = { "us_ssn" },
+                },
+            },
+        }
+        local allowed, reason = engine.check_request(
+            "POST",
+            "/v1/chat/completions",
+            '{"messages":[{"role":"user","content":"999-70-1676"}]}',
+            rules,
+            { is_mcp_path = false }
+        )
+
+        assert.is_false(allowed)
+        assert.truthy(reason:find("us_ssn", 1, true))
+    end)
+
+    it("checks custom blocking patterns against the original body before redaction", function()
+        local rules = {
+            llm_rules = {
+                enabled = true,
+                params = {
+                    pii_patterns = { sensitive_number = "%d%d%d%-%d%d%-%d%d%d%d" },
+                    pii_redact = { "us_ssn" },
+                },
+            },
+        }
+        local allowed, reason = engine.check_request(
+            "POST",
+            "/v1/chat/completions",
+            '{"messages":[{"role":"user","content":"999-70-1676"}]}',
+            rules,
+            { is_mcp_path = false }
+        )
+
+        assert.is_false(allowed)
+        assert.truthy(reason:find("sensitive_number", 1, true))
+    end)
+
     it("returns an unchanged chat body when no configured PII is present", function()
         local request_body = '{"messages":[{"role":"user","content":"hello"}]}'
         local allowed, _, returned_body = engine.check_request(

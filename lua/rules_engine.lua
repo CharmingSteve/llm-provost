@@ -171,21 +171,11 @@ local function check_llm_pii(params, body)
         return true, nil, body
     end
 
-    local redacted_body = body
-    if type(params.pii_redact) == "table" then
-        for _, name in ipairs(params.pii_redact) do
-            local pattern = BUILTIN_PII_PATTERNS[name]
-            if pattern then
-                redacted_body = redacted_body:gsub(pattern, MASKS[name] or "****")
-            end
-        end
-    end
-
     if type(params.pii_block) == "table" then
         for _, name in ipairs(params.pii_block) do
             local pattern = BUILTIN_PII_PATTERNS[name]
-            if pattern and redacted_body:find(pattern) then
-                return false, "PII filter blocked prompt: " .. name .. " detected", redacted_body
+            if pattern and body:find(pattern) then
+                return false, "PII filter blocked prompt: " .. name .. " detected", body
             end
         end
     end
@@ -194,11 +184,21 @@ local function check_llm_pii(params, body)
         for name, pattern in pairs(params.pii_patterns) do
             if type(pattern) == "string" then
                 local matched = pcall(function()
-                    return redacted_body:find(pattern)
-                end) and redacted_body:find(pattern)
+                    return body:find(pattern)
+                end) and body:find(pattern)
                 if matched then
-                    return false, "PII filter blocked prompt: " .. tostring(name) .. " detected", redacted_body
+                    return false, "PII filter blocked prompt: " .. tostring(name) .. " detected", body
                 end
+            end
+        end
+    end
+
+    local redacted_body = body
+    if type(params.pii_redact) == "table" then
+        for _, name in ipairs(params.pii_redact) do
+            local pattern = BUILTIN_PII_PATTERNS[name]
+            if pattern then
+                redacted_body = redacted_body:gsub(pattern, MASKS[name] or "****")
             end
         end
     end
