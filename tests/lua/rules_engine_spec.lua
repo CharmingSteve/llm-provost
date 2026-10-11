@@ -109,18 +109,21 @@ describe("rules_engine MCP governance", function()
                 },
             },
         }
-        local body = '{"messages":[{"role":"tool","content":"SSN 999-70-1676"}]}'
+        local request_body = '{"messages":[{"role":"tool","content":"SSN 999-70-1676"}]}'
         local allowed, reason, redacted_body = engine.check_request(
             "POST",
             "/v1/chat/completions",
-            body,
+            request_body,
             rules,
             { is_mcp_path = false }
         )
 
         assert.is_true(allowed)
         assert.equals("chat path allowed", reason)
-        assert.equals('{"messages":[{"role":"tool","content":"SSN ***-**-****"}]}', redacted_body)
+        assert.equals(
+            '{"messages":[{"role":"tool","content":"SSN ***-**-****"}]}',
+            redacted_body
+        )
     end)
 
     it("continues to block AWS access keys in chat requests", function()
@@ -146,16 +149,16 @@ describe("rules_engine MCP governance", function()
     end)
 
     it("returns an unchanged chat body when no configured PII is present", function()
-        local body = '{"messages":[{"role":"user","content":"hello"}]}'
+        local request_body = '{"messages":[{"role":"user","content":"hello"}]}'
         local allowed, _, returned_body = engine.check_request(
             "POST",
             "/v1/chat/completions",
-            body,
+            request_body,
             { llm_rules = { enabled = true, params = { pii_redact = { "us_ssn" } } } },
             { is_mcp_path = false }
         )
 
         assert.is_true(allowed)
-        assert.equals(body, returned_body)
+        assert.equals(request_body, returned_body)
     end)
 end)

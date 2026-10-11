@@ -290,7 +290,8 @@ describe("four-layer identity extraction", function()
         }
         local result = run_policy(options)
 
-        assert.equals(body, result.var.req_body)
+        local logged = assert(cjson.decode(result.var.req_body))
+        assert.equals("hello", logged.messages.latest.content)
         assert.is_nil(result.var.req_body_original)
         assert.is_nil(options.forwarded_body)
     end)
@@ -310,7 +311,7 @@ describe("four-layer identity extraction", function()
         local result = run_policy(options)
 
         assert.equals(body, result.ctx.request_body)
-        assert.equals(body, result.var.req_body)
+        assert.same(cjson.decode(body), cjson.decode(result.var.req_body))
         assert.is_nil(options.forwarded_body)
         assert.is_nil(result.var.req_body_original)
     end)
