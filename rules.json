@@ -88,16 +88,16 @@
     "fhir": {
       "tool_allowlist": {
         "enabled": true,
-        "description": "FHIR is read-only: only search, read, capabilities and user context are permitted.",
+        "description": "FHIR is NOT read-only: create operations are allowed,  search, read, capabilities and user context are permitted.",
         "params": {
-          "tools": ["search", "read", "get_capabilities", "get_user"]
+          "tools": ["create", "search", "read", "get_capabilities", "get_user"]
         }
       },
       "tool_blocklist": {
         "enabled": true,
-        "description": "FHIR writes are forbidden.",
+        "description": "FHIR writes are allowed except for update and delete operations.",
         "params": {
-          "tools": ["create", "update", "delete"]
+          "tools": ["update", "delete"]
         }
       }
     },
