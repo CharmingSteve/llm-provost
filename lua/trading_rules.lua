@@ -467,8 +467,8 @@ end
 -- @param  rules   table|nil  Rules table from shared dict.  Nil is treated as
 --                            an empty table (fail-open: no rules applied).
 -- @return blocked bool       true when the request must be blocked.
--- @return reason  string|nil Human-readable PROVOST_INTERVENTION message, or
---                            nil when not blocked.
+-- @return reason  string|nil Bare rule reason (branded at the HTTP boundary),
+--                            or nil when not blocked.
 function _M.check_request(parsed, rules, context)
     rules = resolve_rule_aliases(rules)
     context = resolve_context(context)
@@ -498,7 +498,7 @@ function _M.check_request(parsed, rules, context)
         if inferred_class ~= nil
            and not is_allowed_asset_class(allowed_classes_rule.params.classes, inferred_class) then
             return true,
-                "PROVOST_INTERVENTION: Asset class '" .. inferred_class ..
+                "Asset class '" .. inferred_class ..
                 "' is not allowed by current policy."
         end
     end
@@ -517,7 +517,7 @@ function _M.check_request(parsed, rules, context)
         local qty = normalize_quantity(args)
         if qty ~= nil and qty > limit then
             return true,
-                "PROVOST_INTERVENTION: Risk Limit Exceeded. " ..
+                "Risk Limit Exceeded. " ..
                 "Attempted trade size too large. Blocked to protect capital."
         end
 
@@ -529,13 +529,13 @@ function _M.check_request(parsed, rules, context)
                 local estimated_qty = notional / limit_price
                 if estimated_qty > limit then
                     return true,
-                        "PROVOST_INTERVENTION: Risk Limit Exceeded. " ..
+                        "Risk Limit Exceeded. " ..
                         "Notional order estimated at " .. string.format("%.2f", estimated_qty) ..
                         " shares exceeds limit of " .. limit .. "."
                 end
             else
                 return true,
-                    "PROVOST_INTERVENTION: Risk Limit Exceeded. " ..
+                    "Risk Limit Exceeded. " ..
                     "Notional orders require limit_price for safe evaluation."
             end
         end
@@ -556,13 +556,13 @@ function _M.check_request(parsed, rules, context)
 
             if estimated_value and estimated_value > limit_value then
                 return true,
-                    "PROVOST_INTERVENTION: Risk Limit Exceeded. " ..
+                    "Risk Limit Exceeded. " ..
                     "Attempted trade value too large. Blocked to protect capital."
             end
 
             if notional ~= nil and notional > 0 and (limit_price == nil or limit_price <= 0) then
                 return true,
-                    "PROVOST_INTERVENTION: Risk Limit Exceeded. " ..
+                    "Risk Limit Exceeded. " ..
                     "Notional orders require limit_price for safe evaluation."
             end
         end
@@ -590,7 +590,7 @@ function _M.check_request(parsed, rules, context)
                     local add_ok, add_err = store:add(exposure_key, 0, window_seconds)
                     if not add_ok and add_err ~= "exists" and add_err ~= "not found" then
                         return true,
-                            "PROVOST_INTERVENTION: Risk State Unavailable. " ..
+                            "Risk State Unavailable. " ..
                             "Blocked to avoid untracked cumulative exposure."
                     end
 
@@ -598,14 +598,14 @@ function _M.check_request(parsed, rules, context)
                     local new_total = current + estimated_value
                     if new_total > limit_value then
                         return true,
-                            "PROVOST_INTERVENTION: Cumulative Risk Limit Exceeded. " ..
+                            "Cumulative Risk Limit Exceeded. " ..
                             "Rolling trade exposure too large within active window."
                     end
 
                     local set_ok = store:set(exposure_key, new_total, window_seconds)
                     if not set_ok then
                         return true,
-                            "PROVOST_INTERVENTION: Risk State Unavailable. " ..
+                            "Risk State Unavailable. " ..
                             "Blocked to avoid untracked cumulative exposure."
                     end
                 end
@@ -639,12 +639,12 @@ function _M.check_request(parsed, rules, context)
                     local add_ok, add_err = store:add(cooldown_key, 1, window_seconds)
                     if not add_ok and add_err == "exists" then
                         return true,
-                            "PROVOST_INTERVENTION: Symbol Cooldown Active. " ..
+                            "Symbol Cooldown Active. " ..
                             "Symbol '" .. ticker .. "' was already ordered within the active " ..
                             window_seconds .. "s window. Wait before reordering."
                     elseif not add_ok then
                         return true,
-                            "PROVOST_INTERVENTION: Risk State Unavailable. " ..
+                            "Risk State Unavailable. " ..
                             "Blocked to avoid untracked symbol cooldown."
                     end
                 end
@@ -664,7 +664,7 @@ function _M.check_request(parsed, rules, context)
        and tool_name ~= nil then
         if has_invalid_ticker_type(args) then
             return true,
-                "PROVOST_INTERVENTION: Invalid ticker type. " ..
+                "Invalid ticker type. " ..
                 "Ticker fields must be strings."
         end
         local ticker = normalize_ticker(args)
@@ -676,7 +676,7 @@ function _M.check_request(parsed, rules, context)
                         local blocked_symbol = normalize_identifier(blocked_sym)
                         if blocked_symbol ~= nil and ticker == blocked_symbol:upper() then
                             return true,
-                                "PROVOST_INTERVENTION: Restricted symbol '" .. ticker ..
+                                "Restricted symbol '" .. ticker ..
                                 "' blocked for tool '" .. tool_name .. "'."
                         end
                     end
@@ -697,7 +697,7 @@ function _M.check_request(parsed, rules, context)
        and type(allowed_rule.params.tickers) == "table" then
         if has_invalid_ticker_type(args) then
             return true,
-                "PROVOST_INTERVENTION: Invalid ticker type. " ..
+                "Invalid ticker type. " ..
                 "Ticker fields must be strings."
         end
         local ticker = normalize_ticker(args)
@@ -712,7 +712,7 @@ function _M.check_request(parsed, rules, context)
             end
             if not found then
                 return true,
-                    "PROVOST_INTERVENTION: Ticker '" .. ticker ..
+                    "Ticker '" .. ticker ..
                     "' is not in the allowed symbol list."
             end
         end
@@ -726,7 +726,7 @@ function _M.check_request(parsed, rules, context)
     if type(ticker_rule) == "table" and ticker_rule.enabled == true then
         if has_invalid_ticker_type(args) then
             return true,
-                "PROVOST_INTERVENTION: Invalid ticker type. " ..
+                "Invalid ticker type. " ..
                 "Ticker fields must be strings."
         end
         local ticker = normalize_ticker(args)
@@ -736,7 +736,7 @@ function _M.check_request(parsed, rules, context)
                 local blocked_symbol = normalize_identifier(blocked_sym)
                 if blocked_symbol ~= nil and ticker == blocked_symbol:upper() then
                     return true,
-                        "PROVOST_INTERVENTION: Ticker '" .. ticker ..
+                        "Ticker '" .. ticker ..
                         "' is on the restricted list."
                 end
             end
@@ -758,7 +758,7 @@ function _M.check_request(parsed, rules, context)
             local hour    = os.date("!*t", ngx.time()).hour
             if hour < start_h or hour >= end_h then
                 return true,
-                    "PROVOST_INTERVENTION: Trading outside allowed window " ..
+                    "Trading outside allowed window " ..
                     "(" .. start_h .. ":00-" .. end_h .. ":00 UTC)."
             end
         end
@@ -784,26 +784,26 @@ function _M.check_http_request(method, path, raw_body, rules, context)
        and type(forbidden_rule.params) == "table"
        and type(forbidden_rule.params.tools) == "table"
        and is_forbidden(http_method, http_path, forbidden_rule.params.tools) then
-        return true, "PROVOST_INTERVENTION: Forbidden Endpoint"
+        return true, "Forbidden Endpoint"
     end
 
     local broker_account_id = extract_account_id(http_path)
     if broker_account_id then
         if type(context) ~= "table" or type(context.get_account_id) ~= "function" then
-            return true, "PROVOST_INTERVENTION: Account ID Discovery Failed"
+            return true, "Account ID Discovery Failed"
         end
 
         local discovered_account_id, discover_err = context.get_account_id()
         if not discovered_account_id or discovered_account_id == "" then
-            return true, "PROVOST_INTERVENTION: Account ID Discovery Failed"
+            return true, "Account ID Discovery Failed"
         end
 
         if discover_err and discover_err ~= "" then
-            return true, "PROVOST_INTERVENTION: Account ID Discovery Failed"
+            return true, "Account ID Discovery Failed"
         end
 
         if broker_account_id ~= discovered_account_id then
-            return true, "PROVOST_INTERVENTION: Account ID Mismatch"
+            return true, "Account ID Mismatch"
         end
     end
 
@@ -816,7 +816,7 @@ function _M.check_http_request(method, path, raw_body, rules, context)
 
         local original_order, fetch_err = fetch_json(context, route, order_endpoint)
         if not original_order then
-            return true, "PROVOST_INTERVENTION: Order Lookup Failed"
+            return true, "Order Lookup Failed"
         end
 
         local replace_notional = compute_order_notional(body)
@@ -827,12 +827,12 @@ function _M.check_http_request(method, path, raw_body, rules, context)
            and type(max_replace_rule.params) == "table" then
             local limit = tonumber(max_replace_rule.params.limit)
             if limit and replace_notional and replace_notional > limit then
-                return true, "PROVOST_INTERVENTION: Replace Notional Exceeds Limit"
+                return true, "Replace Notional Exceeds Limit"
             end
         end
 
         if replace_notional and original_notional and replace_notional > original_notional then
-            return true, "PROVOST_INTERVENTION: Replace Notional Exceeds Original"
+            return true, "Replace Notional Exceeds Original"
         end
 
         local market_upgrade_rule = rules.prevent_market_order_upgrade
@@ -846,7 +846,7 @@ function _M.check_http_request(method, path, raw_body, rules, context)
             end
 
             if original_type == "limit" and replacement_type == "market" then
-                return true, "PROVOST_INTERVENTION: Market Order Upgrade Not Allowed"
+                return true, "Market Order Upgrade Not Allowed"
             end
         end
     end
@@ -858,7 +858,7 @@ function _M.check_http_request(method, path, raw_body, rules, context)
            and type(allowed_close_rule.params) == "table"
            and type(allowed_close_rule.params.tickers) == "table"
            and not ticker_allowed(symbol, allowed_close_rule.params.tickers) then
-            return true, "PROVOST_INTERVENTION: Symbol Not Allowed for Close"
+            return true, "Symbol Not Allowed for Close"
         end
 
         local route = broker_account_id and "broker" or "trading"
@@ -868,7 +868,7 @@ function _M.check_http_request(method, path, raw_body, rules, context)
 
         local position_payload = fetch_json(context, route, position_endpoint)
         if not position_payload then
-            return true, "PROVOST_INTERVENTION: Position Lookup Failed"
+            return true, "Position Lookup Failed"
         end
 
         local close_notional = compute_position_notional(position_payload)
@@ -877,7 +877,7 @@ function _M.check_http_request(method, path, raw_body, rules, context)
            and type(max_close_rule.params) == "table" then
             local limit = tonumber(max_close_rule.params.limit)
             if limit and close_notional and close_notional > limit then
-                return true, "PROVOST_INTERVENTION: Close Notional Exceeds Limit"
+                return true, "Close Notional Exceeds Limit"
             end
         end
     end

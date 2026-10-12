@@ -5,16 +5,52 @@ local cjson = require("cjson.safe")
 require("outbound_identity").resolve(false)
 
 local function reject(status, message)
+    if status == ngx.HTTP_FORBIDDEN then
+        message = require("intervention").brand(message)
+    end
     ngx.status = status
     ngx.header["Content-Type"] = "application/json"
     ngx.say(cjson.encode({ error = message }))
     return ngx.exit(status)
 end
 
--- Enforce read-only on the REST hop too, even if an MCP tool bypasses policy.
+-- Resource types from rules.json mcp_servers.fhir.write_resource_allowlist.
+-- Missing, disabled or unparseable rules allow no writes (fail-closed).
+local function write_allowed_types()
+    local raw = ngx.shared.rules and ngx.shared.rules:get("rules")
+    local rules = raw and cjson.decode(raw)
+    local fhir = type(rules) == "table" and type(rules.mcp_servers) == "table"
+        and rules.mcp_servers.fhir
+    local rule = type(fhir) == "table" and fhir.write_resource_allowlist
+    if type(rule) ~= "table" or rule.enabled == false
+       or type(rule.params) ~= "table" or type(rule.params.types) ~= "table" then
+        return {}
+    end
+    return rule.params.types
+end
+
+-- Type-level write gate on the REST hop, even if an MCP tool bypasses policy.
+-- Only a plain create (POST /fhir/<Type>) can pass; transactions/batches
+-- (POST /fhir), instance paths and operations stay blocked. Controlled
+-- substance limits are enforced in rules_engine.lua, which sees tool arguments.
 local method = ngx.req.get_method()
 if method ~= "GET" and method ~= "HEAD" then
-    return reject(ngx.HTTP_FORBIDDEN, "FHIR is read-only: write requests are forbidden")
+    local allowed = false
+    if method == "POST" then
+        local path = (ngx.var.request_uri or ""):match("^/fhir([^?]*)")
+        local resource_type = path and path:match("^/(%u%a*)/?$")
+        if resource_type then
+            for _, value in ipairs(write_allowed_types()) do
+                if value == resource_type then
+                    allowed = true
+                    break
+                end
+            end
+        end
+    end
+    if not allowed then
+        return reject(ngx.HTTP_FORBIDDEN, "FHIR is read-only: write requests are forbidden")
+    end
 end
 
 local base = os.getenv("FHIR_BASE_URL") or "http://hapi.fhir.org/baseR4"

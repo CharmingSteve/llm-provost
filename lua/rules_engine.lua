@@ -268,6 +268,205 @@ local function effective_rules(rules, context)
     return merged
 end
 
+-- ---------------------------------------------------------------------------
+-- Selective write governance (rules.mcp_servers[<server>].write_resource_allowlist
+-- and .controlled_substance_rules). Deterministic string/number logic only.
+-- ---------------------------------------------------------------------------
+
+local function positive_number(value)
+    local n = tonumber(value)
+    if not n or n ~= n or n == math.huge or n <= 0 then
+        return nil
+    end
+    return n
+end
+
+local function single_entry(list)
+    if type(list) ~= "table" or #list ~= 1 or type(list[1]) ~= "table" then
+        return nil
+    end
+    return list[1]
+end
+
+-- "Tablets", "{tablet}" and "tablet" compare equal; anything else must match.
+local function normalize_unit(quantity)
+    local unit = quantity.code or quantity.unit
+    if type(unit) ~= "string" then
+        return nil
+    end
+    unit = unit:lower():gsub("[{}%s]", "")
+    if unit:sub(-1) == "s" and #unit > 1 then
+        unit = unit:sub(1, -2)
+    end
+    return unit ~= "" and unit or nil
+end
+
+local PERIOD_UNITS_PER_DAY = { h = 24, d = 1, wk = 1 / 7 }
+
+-- dosageInstruction -> per-dose quantity table and doses per day, or nil when
+-- absent or ambiguous (several instructions, dose/frequency ranges, PRN-only).
+local function parse_dosage(dosage_instructions)
+    local instruction = single_entry(dosage_instructions)
+    if not instruction then
+        return nil
+    end
+
+    local dose_and_rate = single_entry(instruction.doseAndRate)
+    local dose = dose_and_rate and dose_and_rate.doseQuantity
+    if type(dose) ~= "table" or not positive_number(dose.value) then
+        return nil
+    end
+
+    local timing = type(instruction.timing) == "table" and instruction.timing["repeat"]
+    if type(timing) ~= "table"
+       or timing.frequencyMax ~= nil
+       or timing.periodMax ~= nil then
+        return nil
+    end
+    local frequency = positive_number(timing.frequency)
+    local period = positive_number(timing.period)
+    local per_day = PERIOD_UNITS_PER_DAY[timing.periodUnit]
+    if not frequency or not period or not per_day then
+        return nil
+    end
+
+    return dose, frequency * per_day / period
+end
+
+-- Days supply of a MedicationRequest, or nil when not computable. Priority:
+--   a. dispenseRequest.expectedSupplyDuration in day units
+--   b. dispenseRequest.quantity / (dose quantity * doses per day)
+local function compute_days_supply(payload)
+    local dispense = type(payload) == "table" and payload.dispenseRequest
+    if type(dispense) ~= "table" then
+        return nil
+    end
+
+    local duration = dispense.expectedSupplyDuration
+    if type(duration) == "table" then
+        local unit = type(duration.unit) == "string" and duration.unit:lower() or ""
+        local value = positive_number(duration.value)
+        if value and (duration.code == "d" or unit:find("day", 1, true)) then
+            return value
+        end
+    end
+
+    local quantity = dispense.quantity
+    local total = type(quantity) == "table" and positive_number(quantity.value)
+    if not total then
+        return nil
+    end
+    local dose, doses_per_day = parse_dosage(payload.dosageInstruction)
+    if not dose then
+        return nil
+    end
+    local total_unit, dose_unit = normalize_unit(quantity), normalize_unit(dose)
+    if total_unit and dose_unit and total_unit ~= dose_unit then
+        return nil
+    end
+
+    return total / (tonumber(dose.value) * doses_per_day)
+end
+
+-- Applicable controlled-substance cap (days) for the caller.
+--
+-- Extension point (NOT implemented yet): resolve the caller's OIDC groups from
+-- the identity headers already transiting the proxy (via context) and return
+-- the matching params.group_overrides[<group>] value (0 = blocked). Until
+-- then, everyone gets default_max_days_supply. A missing or invalid default
+-- fails closed to 0 (controlled substances blocked).
+local function get_max_days_supply(params, _context)
+    local cap = tonumber(params.default_max_days_supply)
+    if not cap or cap ~= cap or cap < 0 then
+        return 0
+    end
+    return cap
+end
+
+local function format_days(days)
+    if days == math.floor(days) then
+        return string.format("%d", days)
+    end
+    return string.format("%.1f", days)
+end
+
+local function check_controlled_substance(server_rules, payload, serialized, context)
+    local params = enabled_params(server_rules.controlled_substance_rules)
+    if not params or type(params.substances) ~= "table" then
+        return true
+    end
+    if type(serialized) ~= "string" then
+        return false, "controlled substance blocked: payload not inspectable"
+    end
+    serialized = serialized:lower()
+
+    local substance
+    for _, candidate in ipairs(params.substances) do
+        if type(candidate) == "string" and candidate ~= ""
+           and serialized:find(candidate:lower(), 1, true) then
+            substance = candidate:lower()
+            break
+        end
+    end
+    if not substance then
+        return true
+    end
+
+    local days = compute_days_supply(payload)
+    if not days then
+        return false, "controlled substance blocked: days supply not computable"
+    end
+    -- Round up partial days (absorbing float noise) so caps compare in whole days.
+    days = math.ceil(days - 1e-9)
+
+    local cap = get_max_days_supply(params, context)
+    if days > cap then
+        return false, "controlled substance blocked: " .. substance
+            .. " exceeds max supply: " .. format_days(days) .. " days > "
+            .. format_days(cap) .. " days"
+    end
+
+    return true
+end
+
+-- Governs the `create` tool for servers that declare write_resource_allowlist.
+-- A disabled or missing type list allows no writes (fail-closed), matching the
+-- REST hop in fhir_policy.lua.
+local function check_write_rules(rules, request, context)
+    local server_rules = get_server_rules(rules, context)
+    if not server_rules
+       or server_rules.write_resource_allowlist == nil
+       or request.tool_name ~= "create" then
+        return true
+    end
+
+    local arguments = type(request.arguments) == "table" and request.arguments or {}
+    local resource_type = type(arguments.type) == "string" and arguments.type or "unknown"
+    local params = enabled_params(server_rules.write_resource_allowlist)
+    if not params or not contains(params.types, resource_type) then
+        return false, "resource type not allowed for write: " .. resource_type
+    end
+
+    -- Payload may arrive as an object or a JSON string; inspect both forms.
+    local payload, serialized = arguments.payload, nil
+    if type(payload) == "string" then
+        payload, serialized = cjson.decode(payload), payload
+    else
+        serialized = cjson.encode(payload)
+    end
+
+    local declared = type(payload) == "table" and payload.resourceType
+    if type(declared) == "string" and declared ~= resource_type then
+        return false, "resource type not allowed for write: " .. declared
+    end
+
+    if resource_type == "MedicationRequest" then
+        return check_controlled_substance(server_rules, payload, serialized, context)
+    end
+
+    return true
+end
+
 -- Per-MCP-server deterministic rules (rules.mcp_servers[<server>]), e.g.
 -- trading rules for the Alpaca MCP server. Delegates to trading_rules.lua,
 -- which keeps Agent Provost's block semantics.
@@ -329,6 +528,11 @@ function _M.check_request(method, uri, body, rules, context)
     end
 
     allowed, reason = check_blocklist(generic_rules, request.tool_name)
+    if not allowed then
+        return false, reason
+    end
+
+    allowed, reason = check_write_rules(rules, request, context)
     if not allowed then
         return false, reason
     end
