@@ -73,9 +73,15 @@ mcpSettings:
     - "https://mcp.atlassian.com"
 
 mcpServers:
-  atlassian:
+
+  fhir:
     type: streamable-http
-    url: https://mcp.atlassian.com/v1/mcp
+    requiresOAuth: false
+    url: http://llm-provost:8000/mcp/fhir/
+    headers:
+      X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
+      X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+      X-Provost-Token: "${PROVOST_TOKEN}"
 
   alpaca:
     type: streamable-http
