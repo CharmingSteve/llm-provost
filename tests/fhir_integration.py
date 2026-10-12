@@ -265,8 +265,9 @@ def main():
                 assert ("POST", "/baseR4/" + resource_type) in FHIRMock.calls[calls:], \
                     FHIRMock.calls[calls:]
                 wait_for_audit(lambda record, resource_type=resource_type:
-                               record.get("request", "").startswith(
-                                   "POST /fhir/" + resource_type + " ")
+                               record.get("request", "").split(" ")[1].rstrip("/")
+                                   == "/fhir/" + resource_type
+                               and record.get("request", "").startswith("POST ")
                                and int(record.get("status", 0)) == 201, start_line)
 
         wait_for_audit(lambda record:
