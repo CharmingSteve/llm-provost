@@ -133,10 +133,18 @@ def patients(payload):
     return []
 
 
+def audit_lines():
+    # nginx creates the log on startup; the stack may still be booting.
+    try:
+        return Path("/var/run/provost/llm-access.log").read_text().splitlines()
+    except FileNotFoundError:
+        return []
+
+
 def wait_for_audit(predicate, start_line, inbound=False):
     for _ in range(60):
         records = []
-        for line in Path("/var/run/provost/llm-access.log").read_text().splitlines()[start_line:]:
+        for line in audit_lines()[start_line:]:
             try:
                 records.append(json.loads(line))
             except json.JSONDecodeError:
@@ -152,7 +160,7 @@ def wait_for_audit(predicate, start_line, inbound=False):
 
 def main():
     live = "--live" in sys.argv
-    start_line = len(Path("/var/run/provost/llm-access.log").read_text().splitlines())
+    start_line = len(audit_lines())
     server = None
     if not live:
         server = ThreadingHTTPServer(("127.0.0.1", 18089), FHIRMock)
