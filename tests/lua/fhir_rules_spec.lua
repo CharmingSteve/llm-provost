@@ -38,7 +38,9 @@ describe("FHIR MCP rules", function()
     end
 
     local function days(n)
-        return { expectedSupplyDuration = { value = n, unit = "days", system = "http://unitsofmeasure.org", code = "d" } }
+        return { expectedSupplyDuration = {
+            value = n, unit = "days", system = "http://unitsofmeasure.org", code = "d",
+        } }
     end
 
     local function twice_daily(dose)
