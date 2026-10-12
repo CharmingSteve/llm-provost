@@ -58,6 +58,23 @@ class FHIRMock(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        body = json.loads(self.rfile.read(length) or b"{}")
+        self.calls.append((self.command, self.path))
+        resource_type = urlsplit(self.path).path.rstrip("/").rsplit("/", 1)[-1]
+        if body.get("resourceType") != resource_type:
+            self.send_error(400)
+            return
+        body["id"] = "provost-created-" + str(len(self.calls))
+        data = json.dumps(body).encode()
+        self.send_response(201)
+        self.send_header("Content-Type", "application/fhir+json")
+        self.send_header("Location", "/baseR4/%s/%s/_history/1" % (resource_type, body["id"]))
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def log_message(self, *_args):
         pass
 
@@ -87,6 +104,15 @@ def rpc(method, params, request_id=1, user="fhir-ci"):
 
 def tool(name, arguments, request_id=2, user="fhir-ci"):
     return rpc("tools/call", {"name": name, "arguments": arguments}, request_id, user)
+
+
+def medication(name, dispense):
+    return {
+        "resourceType": "MedicationRequest", "status": "active", "intent": "order",
+        "subject": {"reference": "Patient/" + PATIENT["id"]},
+        "medicationCodeableConcept": {"text": name},
+        "dispenseRequest": dispense,
+    }
 
 
 def tool_payload(response):
@@ -182,18 +208,58 @@ def main():
                                and record.get("user_id") == "unknown", start_line)
             calls_before = list(FHIRMock.calls)
 
-        for name in ("create", "update", "delete", "unapproved_tool"):
+        for name in ("update", "delete", "unapproved_tool"):
             status, denied = tool(name, {"type": "Patient", "id": PATIENT["id"],
                                         "payload": PATIENT}, 99)
             assert status == 403 and "allowlist" in denied.get("reason", ""), denied
+        status, denied = tool("create", {"type": "Patient", "payload": PATIENT}, 99)
+        assert status == 403 and denied.get("reason", "").endswith(
+            "resource type not allowed for write: Patient"), denied
+        for supply, reason in (
+            ({"expectedSupplyDuration": {"value": 30, "unit": "days", "code": "d"}},
+             "controlled substance blocked: oxycontin exceeds max supply: 30 days > 3 days"),
+            ({}, "controlled substance blocked: days supply not computable"),
+        ):
+            status, denied = tool("create", {"type": "MedicationRequest",
+                                             "payload": medication("OxyContin 10 mg", supply)}, 99)
+            assert status == 403 and denied.get("reason", "").endswith(reason), denied
 
         # The second boundary must also block direct REST writes, not just tools.
         for method in ("POST", "PUT", "PATCH", "DELETE"):
             status, denied = request("http://127.0.0.1:8081/fhir/Patient",
                                      PATIENT, method)
             assert status == 403 and "read-only" in denied["error"], denied
+        for method, path in (("PUT", "/fhir/Condition/1"), ("DELETE", "/fhir/Condition/1"),
+                             ("POST", "/fhir"), ("POST", "/fhir/Condition/1")):
+            status, denied = request("http://127.0.0.1:8081" + path,
+                                     {"resourceType": "Condition"}, method)
+            assert status == 403 and "read-only" in denied["error"], (path, denied)
         if not live:
             assert calls_before == FHIRMock.calls, FHIRMock.calls
+
+        # Clinical documentation writes pass both layers. Mock only: never
+        # write to the public HAPI server in --live mode.
+        if not live:
+            subject = {"reference": "Patient/" + PATIENT["id"]}
+            for resource_type, payload in (
+                ("Condition", {"resourceType": "Condition", "subject": subject,
+                               "code": {"text": "Seasonal allergic rhinitis"}}),
+                ("Observation", {"resourceType": "Observation", "status": "final",
+                                 "subject": subject, "code": {"text": "Heart rate"}}),
+                ("MedicationRequest", medication("OxyContin 10 mg", {
+                    "expectedSupplyDuration": {"value": 3, "unit": "days", "code": "d"}})),
+                ("MedicationRequest", medication("Amoxicillin 500 mg", {
+                    "expectedSupplyDuration": {"value": 30, "unit": "days", "code": "d"}})),
+            ):
+                calls = len(FHIRMock.calls)
+                status, created = tool("create", {"type": resource_type, "payload": payload})
+                assert status == 200 and not created["result"].get("isError"), created
+                assert ("POST", "/baseR4/" + resource_type) in FHIRMock.calls[calls:], \
+                    FHIRMock.calls[calls:]
+                wait_for_audit(lambda record, resource_type=resource_type:
+                               record.get("request", "").startswith(
+                                   "POST /fhir/" + resource_type + " ")
+                               and int(record.get("status", 0)) == 201, start_line)
 
         wait_for_audit(lambda record:
                        record.get("request", "").startswith("GET /fhir/Patient?")
@@ -208,7 +274,7 @@ def main():
         wait_for_audit(lambda record:
                        record.get("request", "").startswith("DELETE /fhir/Patient ")
                        and int(record.get("status", 0)) == 403, start_line)
-        print("FHIR initialize/list/read, write denials, REST routing and audit passed")
+        print("FHIR initialize/list/read, selective writes, write denials, REST routing and audit passed")
     finally:
         if server:
             server.shutdown()

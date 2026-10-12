@@ -99,6 +99,36 @@
         "params": {
           "tools": ["update", "delete"]
         }
+      },
+      "write_resource_allowlist": {
+        "enabled": true,
+        "description": "FHIR writes (create) allowed for clinical documentation resource types — the working set a physician needs. Identity/administrative records and deletions stay blocked.",
+        "params": {
+          "types": [
+            "Condition",
+            "MedicationRequest",
+            "Observation",
+            "Encounter",
+            "AllergyIntolerance",
+            "Procedure",
+            "Immunization",
+            "DiagnosticReport",
+            "CarePlan",
+            "ServiceRequest",
+            "DocumentReference",
+            "Communication",
+            "ClinicalImpression"
+          ]
+        }
+      },
+      "controlled_substance_rules": {
+        "enabled": true,
+        "description": "Controlled substances are prescribable but capped at a 3-day supply. Default cap applies to everyone until per-group overrides are populated from OIDC groups (future). group_overrides is the extension point: keys will be OIDC group names (e.g. nurses, er_doctors, gps, pain_specialists), values = max days supply (0 = blocked). Not implemented yet; keep empty.",
+        "params": {
+          "substances": ["oxycontin", "oxycodone", "fentanyl", "morphine", "hydrocodone", "methadone", "adderall", "percocet", "dilaudid", "hydromorphone", "codeine", "meperidine"],
+          "default_max_days_supply": 3,
+          "group_overrides": {}
+        }
       }
     },
     "alpaca": {
