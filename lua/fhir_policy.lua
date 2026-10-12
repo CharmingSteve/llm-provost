@@ -5,6 +5,9 @@ local cjson = require("cjson.safe")
 require("outbound_identity").resolve(false)
 
 local function reject(status, message)
+    if status == ngx.HTTP_FORBIDDEN then
+        message = require("intervention").brand(message)
+    end
     ngx.status = status
     ngx.header["Content-Type"] = "application/json"
     ngx.say(cjson.encode({ error = message }))
