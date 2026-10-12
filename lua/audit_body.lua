@@ -241,9 +241,14 @@ local function compact_request_body(decoded, original_bytes)
     return cjson.encode(bounded)
 end
 
+-- Empty deltas still count as recognized, but are never stored: Bedrock
+-- gpt-oss sends content="" alongside every reasoning token, and storing it
+-- interleaves empty content segments that defeat append_segment merging.
 local function append_text(parts, value)
     if type(value) == "string" then
-        parts[#parts + 1] = value
+        if value ~= "" then
+            parts[#parts + 1] = value
+        end
         return true
     end
     if type(value) ~= "table" then
@@ -255,7 +260,9 @@ local function append_text(parts, value)
         if type(part) == "table" then
             local text = part.text or part.content
             if type(text) == "string" then
-                parts[#parts + 1] = text
+                if text ~= "" then
+                    parts[#parts + 1] = text
+                end
                 found = true
             end
         end
@@ -631,25 +638,52 @@ function _M.compact_request(raw, mode)
     return compact_request_body(redacted, #raw) or "[unencodable request body omitted]"
 end
 
-local function stream_result(state, complete, interrupted)
+-- Builds one legible record from the buffered segments: text of each kind is
+-- joined into a single field and tool-call fragments are merged by index.
+-- Threshold flushes pass partial=true; the finalize record carries the
+-- remainder plus completion status.
+local function stream_result(state, complete, interrupted, partial)
     local result = {
         chunk = state.chunk,
         complete = complete,
     }
-    if #state.segments == 1 then
-        local segment = state.segments[1]
-        if segment.kind == "content" then
-            result.content = segment.text
-        elseif segment.kind == "reasoning" then
-            result.reasoning = segment.text
-        elseif segment.kind == "tool_call" then
-            result.tool_calls = { segment.tool_call }
-        else
-            result[segment.kind] = segment.text
-        end
-    elseif #state.segments > 1 then
-        result.segments = state.segments
+    if partial then
+        result.partial = true
     end
+
+    local texts = {}
+    local tool_calls = {}
+    for _, segment in ipairs(state.segments) do
+        if segment.kind == "tool_call" then
+            local call = segment.tool_call
+            local current = tool_calls[call.index]
+            if current then
+                current.arguments = current.arguments .. call.arguments
+                current.id = current.id ~= "" and current.id or call.id
+                current.type = current.type ~= "" and current.type or call.type
+                current.name = current.name ~= "" and current.name or call.name
+            else
+                current = {
+                    index = call.index,
+                    id = call.id,
+                    type = call.type,
+                    name = call.name,
+                    arguments = call.arguments,
+                }
+                tool_calls[call.index] = current
+                result.tool_calls = result.tool_calls or {}
+                result.tool_calls[#result.tool_calls + 1] = current
+            end
+        else
+            texts[segment.kind] = texts[segment.kind] or {}
+            local parts = texts[segment.kind]
+            parts[#parts + 1] = segment.text
+        end
+    end
+    for kind, parts in pairs(texts) do
+        result[kind] = table.concat(parts)
+    end
+
     if state.finish_reason ~= nil then
         result.finish_reason = state.finish_reason
     end
@@ -672,7 +706,7 @@ local function emit_segments(state)
     if #state.segments == 0 then
         return
     end
-    local encoded = assert(cjson.encode(stream_result(state, false, false)))
+    local encoded = assert(cjson.encode(stream_result(state, false, false, true)))
     local ok, err = require("audit_access").emit_chunk(encoded, state.chunk)
     if not ok then
         error("streaming audit failed closed: " .. tostring(err))
@@ -687,6 +721,10 @@ end
 
 local function append_segment(state, kind, value, tool_call)
     value = sanitize(tostring(value or ""))
+    -- Tool calls keep empty-argument segments so their id/name are recorded.
+    if value == "" and kind ~= "tool_call" then
+        return
+    end
     repeat
         if state.segment_bytes >= MAX_COMPACT_TEXT_BYTES
             or #state.segments >= MAX_STREAM_SEGMENTS
