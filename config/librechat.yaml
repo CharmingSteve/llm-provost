@@ -73,10 +73,6 @@ mcpSettings:
 #    - "https://mcp.atlassian.com"
 
 mcpServers:
-#  atlassian:
-#    type: streamable-http
-#    url: https://mcp.atlassian.com/v1/mcp
-
   alpaca:
     type: streamable-http
     requiresOAuth: false
