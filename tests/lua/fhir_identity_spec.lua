@@ -5,9 +5,11 @@ local identity = require("outbound_identity")
 
 describe("FHIR outbound audit identity isolation", function()
     local original_ngx
+    local cleared
 
     before_each(function()
         original_ngx = _G.ngx
+        cleared = {}
         local values = {
             ["last:request_id"] = "another-request",
             ["last:user_id"] = "another-user",
@@ -25,6 +27,9 @@ describe("FHIR outbound audit identity isolation", function()
                 get_headers = function() return {} end,
                 get_body_data = function() return nil end,
                 set_header = function() end,
+                clear_header = function(name)
+                    cleared[#cleared + 1] = name
+                end,
             },
             shared = { provost_ctx = {
                 get = function(_, key) return values[key] end,
@@ -58,6 +63,11 @@ describe("FHIR outbound audit identity isolation", function()
         identity.resolve()
         assert.equals("another-request", ngx.var.provost_req_id)
         assert.equals("another-user", ngx.var.provost_user_id)
+    end)
+
+    it("requests uncompressed upstream bodies so audit capture stays legible", function()
+        identity.resolve(false)
+        assert.same({ "Accept-Encoding" }, cleared)
     end)
 
     it("captures FHIR response bodies without discovering Alpaca accounts", function()
