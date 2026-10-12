@@ -70,17 +70,9 @@ interface:
 mcpSettings:
   allowedDomains:
     - "http://llm-provost:8000"
-#    - "https://mcp.atlassian.com"
+    - "https://mcp.atlassian.com"
 
 mcpServers:
-  alpaca:
-    type: streamable-http
-    requiresOAuth: false
-    url: http://llm-provost:8000/mcp/alpaca/
-    headers:
-      X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
-      X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
-      X-Provost-Token: "${PROVOST_TOKEN}"
 
   fhir:
     type: streamable-http
@@ -91,6 +83,14 @@ mcpServers:
       X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
       X-Provost-Token: "${PROVOST_TOKEN}"
 
+  alpaca:
+    type: streamable-http
+    requiresOAuth: false
+    url: http://llm-provost:8000/mcp/alpaca/
+    headers:
+      X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
+      X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+      X-Provost-Token: "${PROVOST_TOKEN}"
 
 
     #  dummy:
