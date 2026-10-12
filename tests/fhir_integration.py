@@ -61,7 +61,7 @@ class FHIRMock(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(length) or b"{}")
-        self.calls.append((self.command, self.path))
+        self.calls.append((self.command, urlsplit(self.path).path.rstrip("/")))
         resource_type = urlsplit(self.path).path.rstrip("/").rsplit("/", 1)[-1]
         if body.get("resourceType") != resource_type:
             self.send_error(400)
