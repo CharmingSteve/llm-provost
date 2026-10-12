@@ -143,6 +143,86 @@ request is forwarded; the pre-redaction body is preserved in the
 
 ---
 
+## FHIR Selective Write Governance
+
+FHIR writes are enforced at two independent layers:
+
+| Layer | File | What it checks |
+|---|---|---|
+| MCP tool call | `lua/rules_engine.lua` | Tool allow/blocklist, resource type, controlled-substance supply cap |
+| REST hop (MCP server → FHIR) | `lua/fhir_policy.lua` | HTTP method and resource type only |
+
+### `mcp_servers.fhir.write_resource_allowlist`
+
+The `create` tool is allowed only for the clinical documentation working set a
+physician needs: `Condition`, `MedicationRequest`, `Observation`, `Encounter`,
+`AllergyIntolerance`, `Procedure`, `Immunization`, `DiagnosticReport`,
+`CarePlan`, `ServiceRequest`, `DocumentReference`, `Communication`,
+`ClinicalImpression`.
+
+- The type comes from the tool's `arguments.type`. Types not on the list are blocked
+  with `resource type not allowed for write: <Type>`. A payload whose
+  `resourceType` differs from `arguments.type` is blocked the same way.
+- Identity and administrative records (`Patient`, `Practitioner`, `Organization`, …)
+  are excluded on purpose.
+- Deletions and updates are excluded on purpose. `update` and `delete` stay in the
+  FHIR `tool_blocklist`, and the blocklist still overrides the allowlist. Under
+  HIPAA record-retention rules, a correction is a new amendment, not a deletion of
+  the original record.
+- On the REST hop, `GET`/`HEAD` are always allowed. `POST` is allowed only for a
+  plain create, `POST /fhir/<Type>`, where `<Type>` is on the list. Transactions
+  and batches (`POST /fhir`), instance paths, operations, `PUT`, `PATCH` and
+  `DELETE` are rejected with the read-only message.
+- Fail-closed: if the rule is disabled or missing, or the shared rules can't be
+  parsed, no writes are allowed at either layer (read-only behavior).
+
+### `mcp_servers.fhir.controlled_substance_rules`
+
+These checks apply only to `create` with type `MedicationRequest`, and only in
+the rules engine, which has the parsed tool arguments. The REST hop checks
+resource type only.
+
+1. **Match:** each name in `params.substances` is matched as a case-insensitive
+   substring against the serialized `arguments.payload`. A payload sent as an
+   object or as a JSON string is handled the same way. If nothing matches, the
+   prescription follows the normal write path, whatever its supply.
+2. **Days supply** is computed deterministically, in this priority order:
+   1. `dispenseRequest.expectedSupplyDuration`, when expressed in days
+      (`code: "d"` or a `unit` containing "day").
+   2. `dispenseRequest.quantity.value ÷ (dose quantity × doses per day)`. This is
+      used only when the input is unambiguous:
+      - exactly one `dosageInstruction` with exactly one `doseAndRate.doseQuantity`
+      - `timing.repeat` has `frequency`, `period` and `periodUnit` (`h`, `d` or
+        `wk`), with no `frequencyMax`/`periodMax`
+      - quantity and dose units match when both are given (case and plural are
+        ignored)
+   3. Otherwise the request is **blocked**:
+      `controlled substance blocked: days supply not computable` (fail-closed).
+
+   Partial days are rounded up. For example, 60 tablets at 1 tablet twice daily is 30 days.
+3. **Cap:** if the computed days exceed `get_max_days_supply()`, the request is
+   blocked:
+   `controlled substance blocked: <substance> exceeds max supply: <N> days > <cap> days`.
+
+`get_max_days_supply()` currently returns `params.default_max_days_supply`
+(3) for every caller. A missing or invalid default fails closed to 0.
+
+### Future: OIDC group caps (not implemented yet)
+
+`params.group_overrides` is a documented extension point and must stay empty for
+now. When role tiers are added:
+
+- Keys will be OIDC group names (e.g. `nurses`, `er_doctors`, `gps`,
+  `pain_specialists`).
+- Values will be the maximum days supply for that group. `0` means blocked.
+- `get_max_days_supply()` will read the caller's groups from the identity headers
+  that already pass through the proxy, and look them up in `group_overrides`. It
+  will fall back to `default_max_days_supply`.
+
+None of this lookup exists today. Entries added to `group_overrides` are ignored.
+
+---
+
 ## Complete Example
 
 The shipped `rules.json` includes all six required top-level fields with a generic governance example.

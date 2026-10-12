@@ -83,6 +83,7 @@ local function normalize_policy_path(route, uri)
 end
 
 local function reject(detail)
+    detail = require("intervention").brand(detail)
     local audit_error = require("audit_error")
     audit_error.emit("provost_api_to_mcp_error", 403, "PROVOST_INTERVENTION", detail, {
         request_id = ngx.var.provost_req_id,

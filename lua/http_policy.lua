@@ -2,6 +2,7 @@ local cjson = require("cjson.safe")
 local audit_body = require("audit_body")
 local audit_error = require("audit_error")
 local routes = require("routes")
+local intervention = require("intervention")
 local rules_engine = require("rules_engine")
 
 local MAX_REQUEST_BYTES = 1048576
@@ -133,6 +134,9 @@ end
 local function reject(reason, status, error_code)
     status = status or ngx.HTTP_FORBIDDEN
     error_code = error_code or "GOVERNANCE_VIOLATION"
+    if status == ngx.HTTP_FORBIDDEN then
+        reason = intervention.brand(reason)
+    end
     local response_body = cjson.encode({
         error = status == ngx.HTTP_FORBIDDEN
             and "Governance rule violation"
