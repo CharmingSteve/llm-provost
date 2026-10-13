@@ -83,20 +83,13 @@ local function normalize_policy_path(route, uri)
 end
 
 local function reject(detail)
-    detail = require("intervention").brand(detail)
-    local audit_error = require("audit_error")
-    audit_error.emit("provost_api_to_mcp_error", 403, "PROVOST_INTERVENTION", detail, {
-        request_id = ngx.var.provost_req_id,
-    })
-    ngx.status = 403
-    ngx.header["Content-Type"] = "application/json"
-    local body = cjson.encode({
-        error = "PROVOST_INTERVENTION",
-        detail = detail or "Policy violation"
-    })
-    ngx.var.resp_body = body or ""
-    ngx.say(body)
-    return ngx.exit(403)
+    return require("governance_rejection").reject(
+        ngx,
+        ngx.HTTP_FORBIDDEN,
+        "PROVOST_INTERVENTION",
+        detail,
+        "provost_api_to_mcp_error"
+    )
 end
 
 -- 429 reject used when the upstream rate-limit budget is exhausted.

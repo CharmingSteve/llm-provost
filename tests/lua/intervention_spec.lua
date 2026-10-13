@@ -71,8 +71,8 @@ describe("http_policy governance rejection", function()
     it("prefixes the reason once in the response and the audit record", function()
         run("tool not in allowlist: create", true)
         local expected = "PROVOST_INTERVENTION: tool not in allowlist: create"
-        assert.truthy(said:find('"reason":"' .. expected .. '"', 1, true))
-        assert.truthy(said:find('"error":"Governance rule violation"', 1, true))
+        assert.truthy(said:find('"detail":"' .. expected .. '"', 1, true))
+        assert.truthy(said:find('"error":"GOVERNANCE_VIOLATION"', 1, true))
         assert.equals(expected, emitted[4])
     end)
 

@@ -1,8 +1,8 @@
 local cjson = require("cjson.safe")
 local audit_body = require("audit_body")
 local audit_error = require("audit_error")
+local governance_rejection = require("governance_rejection")
 local routes = require("routes")
-local intervention = require("intervention")
 local rules_engine = require("rules_engine")
 
 local MAX_REQUEST_BYTES = 1048576
@@ -135,7 +135,13 @@ local function reject(reason, status, error_code)
     status = status or ngx.HTTP_FORBIDDEN
     error_code = error_code or "GOVERNANCE_VIOLATION"
     if status == ngx.HTTP_FORBIDDEN then
-        reason = intervention.brand(reason)
+        return governance_rejection.reject(
+            ngx,
+            status,
+            error_code,
+            reason,
+            "provost_governance_error"
+        )
     end
     local response_body = cjson.encode({
         error = status == ngx.HTTP_FORBIDDEN
@@ -318,7 +324,11 @@ end
 if not is_mcp_path and ngx.var.backend_name == "bedrock" then
     local host, signing_error = require("bedrock").prepare_request(body)
     if not host then
-        return reject_route("Bedrock authentication is unavailable", ngx.HTTP_SERVICE_UNAVAILABLE, "BEDROCK_AUTH_UNAVAILABLE")
+        return reject_route(
+            "Bedrock authentication is unavailable",
+            ngx.HTTP_SERVICE_UNAVAILABLE,
+            "BEDROCK_AUTH_UNAVAILABLE"
+        )
     end
     ngx.var.llm_target_url = "https://" .. host .. ngx.var.bedrock_path
 end

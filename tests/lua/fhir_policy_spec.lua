@@ -8,14 +8,15 @@ local rules_json = (function()
 end)()
 
 describe("FHIR outbound write boundary", function()
-    local original_ngx, original_identity
-    local base, output, resolved, environment, shared_rules
+    local original_ngx, original_identity, original_audit_error
+    local base, output, resolved, environment, shared_rules, emitted
 
     before_each(function()
         original_ngx = _G.ngx
         original_identity = package.loaded.outbound_identity
+        original_audit_error = package.loaded.audit_error
         base = "https://example.test/baseR4/"
-        output, resolved = nil, false
+        output, resolved, emitted = nil, false, nil
         shared_rules = rules_json
         environment = setmetatable({
             os = { getenv = function() return base end },
@@ -26,6 +27,11 @@ describe("FHIR outbound write boundary", function()
                 resolved = true
             end,
         }
+        package.loaded.audit_error = {
+            emit = function(...)
+                emitted = { ... }
+            end,
+        }
         _G.ngx = {
             req = { get_method = function() return "GET" end },
             var = { request_uri = "/fhir/Patient?_count=1&name=A%20B" },
@@ -34,14 +40,20 @@ describe("FHIR outbound write boundary", function()
             HTTP_FORBIDDEN = 403,
             HTTP_BAD_REQUEST = 400,
             HTTP_INTERNAL_SERVER_ERROR = 500,
+            ERR = "error",
+            ctx = {},
             say = function(value) output = value end,
             exit = function(status) return status end,
+            log = function() end,
+            utctime = function() return "2026-10-13 00:00:00" end,
+            decode_base64 = function() return nil end,
         }
     end)
 
     after_each(function()
         _G.ngx = original_ngx
         package.loaded.outbound_identity = original_identity
+        package.loaded.audit_error = original_audit_error
     end)
 
     local function run()
@@ -75,7 +87,14 @@ describe("FHIR outbound write boundary", function()
         assert.equals(403, run(), method .. " " .. request_uri)
         assert.is_true(resolved)
         assert.is_nil(ngx.var.fhir_target_url)
-        assert.truthy(output:find("read-only", 1, true))
+        local body = assert(require("cjson.safe").decode(output))
+        assert.equals("PROVOST_INTERVENTION", body.error)
+        assert.truthy(body.detail:find("read-only", 1, true))
+        assert.equals("provost_fhir_error", emitted[1])
+        assert.equals(403, emitted[2])
+        assert.equals("PROVOST_INTERVENTION", emitted[3])
+        assert.equals(body.detail, emitted[4])
+        assert.equals(body.detail, require("cjson.safe").decode(emitted[5].resp_body).detail)
     end
 
     it("allows POST creates for clinical documentation types", function()
@@ -146,7 +165,11 @@ describe("FHIR outbound write boundary", function()
             ngx.var.request_uri = request_uri
             assert.equals(400, run())
             assert.is_nil(ngx.var.fhir_target_url)
-            assert.truthy(output:find("Invalid FHIR request URI", 1, true))
+            local body = assert(require("cjson.safe").decode(output))
+            assert.equals("FHIR_BAD_REQUEST", body.error)
+            assert.truthy(body.detail:find("Invalid FHIR request URI", 1, true))
+            assert.equals("provost_fhir_error", emitted[1])
+            assert.equals("FHIR_BAD_REQUEST", emitted[3])
         end
     end)
 end)

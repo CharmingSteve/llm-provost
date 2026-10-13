@@ -58,6 +58,22 @@ describe("Phase 4 audit contract", function()
         "req_body_original",
         "resp_body",
     }
+    local expected_access_variables = {
+        "time_local",
+        "remote_addr",
+        "request",
+        "status",
+        "body_bytes_sent",
+        "request_time",
+        "upstream_response_time",
+        "provost_req_id",
+        "provost_user_id",
+        "provost_customer_id",
+        "provost_conversation_id",
+        "req_body",
+        "req_body_original",
+        "resp_body",
+    }
     local expected_error_fields = {
         "time_local",
         "remote_addr",
@@ -79,6 +95,14 @@ describe("Phase 4 audit contract", function()
     it("defines the complete access and error schemas in order", function()
         assert.same(expected_access_fields, access_fields)
         assert.same(expected_error_fields, error_fields)
+    end)
+
+    it("keeps access log variables server-agnostic and fixed", function()
+        local variables = {}
+        for variable in access_block:gmatch("%$([%a_][%w_]*)") do
+            variables[#variables + 1] = variable
+        end
+        assert.same(expected_access_variables, variables)
     end)
 
     it("includes identity and body fields in both schemas", function()

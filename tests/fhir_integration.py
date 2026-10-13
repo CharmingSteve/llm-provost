@@ -106,6 +106,15 @@ def tool(name, arguments, request_id=2, user="fhir-ci"):
     return rpc("tools/call", {"name": name, "arguments": arguments}, request_id, user)
 
 
+def assert_governance_rejection(status, response, error_code, detail_fragment):
+    assert status == 403, response
+    assert set(response) == {"error", "detail"}, response
+    assert response["error"] == error_code, response
+    detail = response["detail"]
+    assert detail.startswith("PROVOST_INTERVENTION: "), response
+    assert detail_fragment in detail, response
+
+
 def medication(name, dispense):
     return {
         "resourceType": "MedicationRequest", "status": "active", "intent": "order",
@@ -219,10 +228,16 @@ def main():
         for name in ("update", "delete", "unapproved_tool"):
             status, denied = tool(name, {"type": "Patient", "id": PATIENT["id"],
                                         "payload": PATIENT}, 99)
-            assert status == 403 and "allowlist" in denied.get("reason", ""), denied
+            assert_governance_rejection(
+                status, denied, "GOVERNANCE_VIOLATION", "allowlist"
+            )
         status, denied = tool("create", {"type": "Patient", "payload": PATIENT}, 99)
-        assert status == 403 and denied.get("reason", "").endswith(
-            "resource type not allowed for write: Patient"), denied
+        assert_governance_rejection(
+            status,
+            denied,
+            "GOVERNANCE_VIOLATION",
+            "resource type not allowed for write: Patient",
+        )
         for supply, reason in (
             ({"expectedSupplyDuration": {"value": 30, "unit": "days", "code": "d"}},
              "controlled substance blocked: oxycontin exceeds max supply: 30 days > 3 days"),
@@ -230,18 +245,24 @@ def main():
         ):
             status, denied = tool("create", {"type": "MedicationRequest",
                                              "payload": medication("OxyContin 10 mg", supply)}, 99)
-            assert status == 403 and denied.get("reason", "").endswith(reason), denied
+            assert_governance_rejection(
+                status, denied, "GOVERNANCE_VIOLATION", reason
+            )
 
         # The second boundary must also block direct REST writes, not just tools.
         for method in ("POST", "PUT", "PATCH", "DELETE"):
             status, denied = request("http://127.0.0.1:8081/fhir/Patient",
                                      PATIENT, method)
-            assert status == 403 and "read-only" in denied["error"], denied
+            assert_governance_rejection(
+                status, denied, "PROVOST_INTERVENTION", "read-only"
+            )
         for method, path in (("PUT", "/fhir/Condition/1"), ("DELETE", "/fhir/Condition/1"),
                              ("POST", "/fhir"), ("POST", "/fhir/Condition/1")):
             status, denied = request("http://127.0.0.1:8081" + path,
                                      {"resourceType": "Condition"}, method)
-            assert status == 403 and "read-only" in denied["error"], (path, denied)
+            assert_governance_rejection(
+                status, denied, "PROVOST_INTERVENTION", "read-only"
+            )
         if not live:
             assert calls_before == FHIRMock.calls, FHIRMock.calls
 
