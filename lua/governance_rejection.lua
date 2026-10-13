@@ -3,7 +3,7 @@ local intervention = require("intervention")
 
 local _M = {}
 
-function _M.reject(status, error_code, detail, audit_tag)
+function _M.reject(ngx, status, error_code, detail, audit_tag)
     if status == ngx.HTTP_FORBIDDEN then
         detail = intervention.brand(detail)
     else

@@ -136,6 +136,7 @@ local function reject(reason, status, error_code)
     error_code = error_code or "GOVERNANCE_VIOLATION"
     if status == ngx.HTTP_FORBIDDEN then
         return governance_rejection.reject(
+            ngx,
             status,
             error_code,
             reason,
@@ -323,7 +324,11 @@ end
 if not is_mcp_path and ngx.var.backend_name == "bedrock" then
     local host, signing_error = require("bedrock").prepare_request(body)
     if not host then
-        return reject_route("Bedrock authentication is unavailable", ngx.HTTP_SERVICE_UNAVAILABLE, "BEDROCK_AUTH_UNAVAILABLE")
+        return reject_route(
+            "Bedrock authentication is unavailable",
+            ngx.HTTP_SERVICE_UNAVAILABLE,
+            "BEDROCK_AUTH_UNAVAILABLE"
+        )
     end
     ngx.var.llm_target_url = "https://" .. host .. ngx.var.bedrock_path
 end

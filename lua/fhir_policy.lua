@@ -11,6 +11,7 @@ local function reject(status, message)
         or status == ngx.HTTP_BAD_REQUEST and "FHIR_BAD_REQUEST"
         or "FHIR_CONFIGURATION_ERROR"
     return governance_rejection.reject(
+        ngx,
         status,
         error_code,
         message,

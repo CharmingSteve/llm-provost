@@ -84,6 +84,7 @@ end
 
 local function reject(detail)
     return require("governance_rejection").reject(
+        ngx,
         ngx.HTTP_FORBIDDEN,
         "PROVOST_INTERVENTION",
         detail,
