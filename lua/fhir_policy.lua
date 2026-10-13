@@ -1,17 +1,21 @@
 local cjson = require("cjson.safe")
+local governance_rejection = require("governance_rejection")
 
 -- WSO2 strips correlation headers; never attribute its REST calls to the
 -- globally last-seen user, which may belong to another concurrent request.
 require("outbound_identity").resolve(false)
 
 local function reject(status, message)
-    if status == ngx.HTTP_FORBIDDEN then
-        message = require("intervention").brand(message)
-    end
-    ngx.status = status
-    ngx.header["Content-Type"] = "application/json"
-    ngx.say(cjson.encode({ error = message }))
-    return ngx.exit(status)
+    local error_code = status == ngx.HTTP_FORBIDDEN
+        and "PROVOST_INTERVENTION"
+        or status == ngx.HTTP_BAD_REQUEST and "FHIR_BAD_REQUEST"
+        or "FHIR_CONFIGURATION_ERROR"
+    return governance_rejection.reject(
+        status,
+        error_code,
+        message,
+        "provost_fhir_error"
+    )
 end
 
 -- Resource types from rules.json mcp_servers.fhir.write_resource_allowlist.
