@@ -275,6 +275,20 @@ Streaming records are sent over the internal Compose network to Fluent Bit and i
 
 Set `AUDIT_LOG_MODE=raw` in the deployment environment and restart the Compose stack to retain SSE wire data in ordered bounded records for diagnostics. Raw mode is intentionally deployment-scoped and cannot be enabled with a client request header. Local enriched JSON Lines records are written to `logs/fluent-bit-storage/access.log` and `logs/fluent-bit-storage/error.log`.
 
+### Reasoning Display
+
+Bedrock's OpenAI-compatible endpoint returns gpt-oss reasoning inline in the message content as `<reasoning>...</reasoning>`. LibreChat renders reasoning only from a `reasoning_content` field or `<think>` tags, so by default the reasoning shows up as raw text and leaks into auto-generated conversation titles. Set `REASONING_DISPLAY` to normalize the client-bound response on `/llm/*` routes:
+
+| Value | Effect |
+|-------|--------|
+| `off` (default) | Responses pass through byte-for-byte; the transform is never invoked. |
+| `openai` | Reasoning moves into `reasoning_content` (on `message` for JSON responses, on `delta` for SSE streams) and `content` keeps only the answer. |
+| `think` | The tags are renamed to `<think>...</think>` inside `content`. |
+
+Tags are recognized at the start of the content and directly after a previous pair (consecutive pairs merge into one reasoning span); a literal `<reasoning>` quoted later in an answer is left alone. Tags split across stream chunks are handled, and text held while waiting for the rest of a possible tag is released unchanged when the stream ends. Gzip-encoded responses and content types other than JSON and SSE pass through untouched. When enabled, JSON responses on `/llm/*` are sent without `Content-Length` because the body may change size.
+
+Only the client copy is rewritten: the audit log always records the original upstream body with its `<reasoning>` tags. The value is read once when the proxy starts, so restart the `llm-provost` container after changing it.
+
 ### Viewing Local Logs
 
 Run these commands from the repository root. The S3 outputs receive only the `provost.access` and `provost.error` audit streams.
