@@ -89,6 +89,9 @@ function _M.resolve(allow_last_known)
     ngx.var.provost_customer_id = customer_id or (allow_last_known == false and "unknown" or "craig")
     ngx.var.provost_conversation_id = conversation_id or "none"
     ngx.req.set_header("X-Provost-Request-Id", request_id)
+    -- capture_response logs the upstream body verbatim; a gzipped body would
+    -- land in the audit log as binary, so ask upstreams for identity encoding.
+    ngx.req.clear_header("Accept-Encoding")
 end
 
 -- Buffered response capture so the hop's access log carries the full body.

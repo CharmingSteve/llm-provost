@@ -11,6 +11,55 @@ local function compact_sse(raw)
     return decode(audit_body.compact(raw, "text/event-stream", "compact", false))
 end
 
+-- Runs fn with a mocked ngx/audit_access and returns the decoded threshold
+-- records (emit_chunk), the decoded final record (resp_body), and the stream
+-- state as it stood at finalize time.
+local function with_stream(fn)
+    local previous_ngx = _G.ngx
+    local previous_access = package.loaded.audit_access
+    local response = {}
+    local partials = {}
+    _G.ngx = {
+        ctx = {},
+        header = { content_type = "text/event-stream" },
+        var = response,
+    }
+    package.loaded.audit_access = {
+        emit_chunk = function(resp_body)
+            partials[#partials + 1] = decode(resp_body)
+            return true
+        end,
+    }
+    local ok, err = pcall(fn)
+    local state = _G.ngx.ctx.audit_stream_state
+    package.loaded.audit_access = previous_access
+    _G.ngx = previous_ngx
+    assert(ok, err)
+    return partials, decode(response.resp_body), state
+end
+
+local function sse_event(delta, extra)
+    local choice = { delta = delta }
+    local payload = { choices = { choice } }
+    for key, value in pairs(extra or {}) do
+        if key == "finish_reason" then
+            choice.finish_reason = value
+        else
+            payload[key] = value
+        end
+    end
+    return "data: " .. assert(cjson.encode(payload)) .. "\n\n"
+end
+
+local function assert_no_empty_text(record)
+    for key, value in pairs(record) do
+        if key == "content" or key == "reasoning" then
+            assert.is_true(value ~= "", "empty " .. key .. " field in record")
+        end
+    end
+    assert.is_nil(record.segments)
+end
+
 describe("compact audit bodies", function()
     it("reconstructs OpenAI and Ollama SSE content", function()
         local raw = table.concat({
@@ -408,6 +457,179 @@ describe("compact audit bodies", function()
         assert.equals("Partial", result.content)
         assert.is_true(result.truncated)
         _G.ngx = previous_ngx
+    end)
+
+    describe("streaming audit records", function()
+        it("joins reasoning-only deltas without empty content segments", function()
+            local tokens = { "The", " user", " says:", " for", " patient", " 1004" }
+            local partials, final = with_stream(function()
+                for _, token in ipairs(tokens) do
+                    -- Bedrock gpt-oss: an empty content delta rides along
+                    -- with every reasoning token.
+                    audit_body.capture(sse_event({ content = "", reasoning = token }), false)
+                end
+                audit_body.capture("data: [DONE]\n\n", true)
+            end)
+
+            assert.equals(0, #partials)
+            assert.equals("The user says: for patient 1004", final.reasoning)
+            assert.is_nil(final.content)
+            assert_no_empty_text(final)
+            assert.is_nil(final.unparsed_sse_payload)
+        end)
+
+        it("emits exactly one record for a short complete stream", function()
+            local partials, final = with_stream(function()
+                audit_body.capture(sse_event({ role = "assistant", content = "" }), false)
+                audit_body.capture(sse_event({ reasoning = "Check" }), false)
+                audit_body.capture(sse_event({ reasoning = " labs." }), false)
+                audit_body.capture(sse_event({ content = "Dose" }), false)
+                audit_body.capture(sse_event({ content = " stable." }), false)
+                audit_body.capture(sse_event({}, {
+                    finish_reason = "stop",
+                    usage = { total_tokens = 42 },
+                }), false)
+                audit_body.capture("data: [DONE]\n\n", true)
+            end)
+
+            assert.equals(0, #partials)
+            assert.equals("Dose stable.", final.content)
+            assert.equals("Check labs.", final.reasoning)
+            assert.equals("stop", final.finish_reason)
+            assert.equals(42, final.usage.total_tokens)
+            assert.is_true(final.complete)
+            assert.is_nil(final.partial)
+            assert.equals(1, final.chunk)
+        end)
+
+        it("flushes partial records at the byte threshold and reconstructs the text", function()
+            local expected = {}
+            local partials, final = with_stream(function()
+                for index = 1, 300 do
+                    local token = string.format(" token-%04d", index) .. string.rep(".", 40)
+                    expected[#expected + 1] = token
+                    audit_body.capture(sse_event({ content = "", reasoning = token }), false)
+                end
+                audit_body.capture(sse_event({}, { finish_reason = "stop" }), false)
+                audit_body.capture("data: [DONE]\n\n", true)
+            end)
+
+            assert.is_true(#partials >= 1)
+            assert.is_true(#partials <= 2)
+            local reasoning = {}
+            for index, record in ipairs(partials) do
+                assert.is_true(record.partial)
+                assert.is_false(record.complete)
+                assert.equals(index, record.chunk)
+                assert.is_true(#record.reasoning <= 8192)
+                assert_no_empty_text(record)
+                reasoning[#reasoning + 1] = record.reasoning
+            end
+            assert.is_nil(final.partial)
+            assert.is_true(final.complete)
+            assert.equals(#partials + 1, final.chunk)
+            assert.equals("stop", final.finish_reason)
+            assert_no_empty_text(final)
+            reasoning[#reasoning + 1] = final.reasoning or ""
+            assert.equals(table.concat(expected), table.concat(reasoning))
+        end)
+
+        it("keeps a partial audit trail when the stream is interrupted", function()
+            local partials, final = with_stream(function()
+                for _ = 1, 200 do
+                    audit_body.capture(sse_event({ reasoning = string.rep("r", 60) }), false)
+                end
+                audit_body.capture(sse_event({ content = "Half an ans" }), false)
+                audit_body.finalize(true)
+            end)
+
+            assert.is_true(#partials >= 1)
+            for _, record in ipairs(partials) do
+                assert.is_true(record.partial)
+            end
+            assert.is_true(final.interrupted)
+            assert.is_true(final.truncated)
+            assert.is_false(final.complete)
+            assert.equals("Half an ans", final.content)
+            local total = #final.reasoning
+            for _, record in ipairs(partials) do
+                total = total + #(record.reasoning or "")
+            end
+            assert.equals(200 * 60, total)
+        end)
+
+        it("merges interleaved deltas into consecutive same-kind segments", function()
+            local _, final, state = with_stream(function()
+                audit_body.capture(sse_event({ content = "", reasoning = "Think" }), false)
+                audit_body.capture(sse_event({ content = "", reasoning = "ing" }), false)
+                audit_body.capture(sse_event({ content = "", reasoning = " more" }), false)
+                audit_body.capture(sse_event({ content = "An", reasoning = "" }), false)
+                audit_body.capture(sse_event({ content = "swer" }), false)
+                audit_body.capture(sse_event({ reasoning = " again" }), false)
+                audit_body.capture(sse_event({ content = "!" }), false)
+                audit_body.finalize(false)
+            end)
+
+            local kinds = {}
+            for index, segment in ipairs(state.segments) do
+                assert.is_true(segment.text ~= "")
+                if index > 1 then
+                    assert.are_not.equal(state.segments[index - 1].kind, segment.kind)
+                end
+                kinds[#kinds + 1] = segment.kind
+            end
+            assert.same({ "reasoning", "content", "reasoning", "content" }, kinds)
+            assert.equals("Thinking more", state.segments[1].text)
+            assert.equals("Answer!", final.content)
+            assert.equals("Thinking more again", final.reasoning)
+        end)
+
+        it("merges streamed tool-call fragments into one call", function()
+            local _, final = with_stream(function()
+                audit_body.capture(sse_event({ tool_calls = { {
+                    index = 0, id = "call-1", type = "function",
+                    ["function"] = { name = "get_labs", arguments = "" },
+                } } }), false)
+                audit_body.capture(sse_event({ tool_calls = { {
+                    index = 0, ["function"] = { arguments = '{"patient_id":' },
+                } } }), false)
+                audit_body.capture(sse_event({ tool_calls = { {
+                    index = 0, ["function"] = { arguments = "42}" },
+                } } }, { finish_reason = "tool_calls" }), true)
+            end)
+
+            assert.equals(1, #final.tool_calls)
+            assert.equals("call-1", final.tool_calls[1].id)
+            assert.equals("get_labs", final.tool_calls[1].name)
+            assert.equals('{"patient_id":42}', final.tool_calls[1].arguments)
+            assert.equals("tool_calls", final.finish_reason)
+        end)
+
+        it("fails closed when a threshold record cannot be emitted", function()
+            local previous_ngx = _G.ngx
+            local previous_access = package.loaded.audit_access
+            _G.ngx = {
+                ctx = {},
+                header = { content_type = "text/event-stream" },
+                var = {},
+            }
+            package.loaded.audit_access = {
+                emit_chunk = function()
+                    return nil, "disk full"
+                end,
+            }
+
+            local ok, err = pcall(function()
+                for _ = 1, 200 do
+                    audit_body.capture(sse_event({ reasoning = string.rep("r", 60) }), false)
+                end
+            end)
+
+            package.loaded.audit_access = previous_access
+            _G.ngx = previous_ngx
+            assert.is_false(ok)
+            assert.truthy(tostring(err):find("streaming audit failed closed", 1, true))
+        end)
     end)
 
     it("marks an interrupted response that produced no body", function()

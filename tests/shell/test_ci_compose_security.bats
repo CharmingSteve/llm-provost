@@ -87,6 +87,12 @@
   [ "$status" -eq 0 ]
 }
 
+@test "Fluent Bit tail buffers long access records instead of skipping the file" {
+  run grep -F 'Buffer_Max_Size       1M' fluent-bit/conf.d/input-syslog.conf
+  [ "$status" -eq 0 ]
+  run grep -F 'Skip_Long_Lines       On' fluent-bit/conf.d/input-syslog.conf
+  [ "$status" -eq 0 ]
+}
 @test "CI validates compose config with env-file" {
   run grep -E 'docker compose --env-file .env\.versions -f docker-compose\.yml config --quiet' .github/workflows/ci.yml
   [ "$status" -eq 0 ]
