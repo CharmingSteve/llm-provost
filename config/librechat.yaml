@@ -15,12 +15,17 @@ endpoints:
     # The only LibreChat endpoint: every backend in LLM_ROUTES_JSON, listed
     # from the backends that are up with a prefix naming the source
     # (bedrock/..., ollama/..., vllm/...). Add a backend there, not here.
+    # apiKey goes to backends without their own key (bedrock, vllm). The
+    # X-Provost-Backend-Key-<backend> headers carry each backend's own key;
+    # the proxy sends each backend only its key and strips the rest.
     - name: "Provost"
       apiKey: "${LLM_API_KEY}"
       baseURL: "http://llm-provost:8000/llm/v1"
       headers:
         X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
         X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
+        X-Provost-Backend-Key-openwire: "${OPENAI_API_KEY}"
+        X-Provost-Backend-Key-ollama: "${OLLAMA_API_KEY}"
       models:
         default:
           - "bedrock/${BEDROCK_MODEL}"

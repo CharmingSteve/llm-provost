@@ -340,6 +340,7 @@ if aggregate then
             "LLM backend " .. aggregate.backend .. " is unavailable"
         )
     end
+    llm_aggregate.apply_backend_key(aggregate.backend)
     -- req_body above keeps the prefixed id the user selected; only the
     -- upstream copy carries the stripped id.
     body = llm_aggregate.strip_model(body, aggregate)

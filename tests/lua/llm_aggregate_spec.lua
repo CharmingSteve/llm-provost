@@ -41,7 +41,7 @@ end
 
 -- Upstream model listings keyed by backend name; a string value is the
 -- error the probe returns ("timeout" for a hung backend).
-local upstream, upstream_calls, connects, sockets_created
+local upstream, upstream_calls, upstream_auth, connects, sockets_created
 local clock, logs, said
 
 local function install_mocks()
@@ -51,6 +51,7 @@ local function install_mocks()
         vllm = { "gpt-oss:20b" },
     }
     upstream_calls = {}
+    upstream_auth = {}
     connects = {}
     sockets_created = 0
     clock = 1000
@@ -74,9 +75,10 @@ local function install_mocks()
         new = function()
             return {
                 set_timeout = function() end,
-                request_uri = function(_, url)
+                request_uri = function(_, url, opts)
                     for name, base in pairs(ROUTES) do
                         if url == base .. "/models" then
+                            upstream_auth[name] = opts.headers.Authorization
                             local data, err = listing(name)
                             if type(err) == "number" then
                                 return { status = err, body = "{}" }
@@ -227,6 +229,14 @@ describe("llm_aggregate prefix split", function()
         assert.truthy(message:find("openai", 1, true))
     end)
 
+    it("prefers a backend's key header over the client's Authorization", function()
+        local headers = { ["x-provost-backend-key-openwire"] = "ow" , ["x-provost-backend-key-ollama"] = "" }
+        assert.equals("Bearer ow", aggregate.backend_authorization(headers, "openwire", "Bearer llm"))
+        assert.equals("Bearer llm", aggregate.backend_authorization(headers, "ollama", "Bearer llm"))
+        assert.equals("Bearer llm", aggregate.backend_authorization(headers, "vllm", "Bearer llm"))
+        assert.is_nil(aggregate.backend_authorization(nil, "vllm", nil))
+    end)
+
     it("renders errors in the structured error.code shape", function()
         aggregate.reject(404, "LLM_BACKEND_UNKNOWN", "Unknown LLM backend: openai")
         local body = cjson.decode(said)
@@ -288,6 +298,16 @@ describe("llm_aggregate listing", function()
         assert.same({ "ollama/gpt-oss:20b", "ollama/llama3.1:8b", "vllm/gpt-oss:20b" }, ids(listing))
         assert.is_nil(upstream_calls.bedrock)
         assert.equals(0, #logs)
+    end)
+
+    it("sends each backend its own key header, others the client's Authorization", function()
+        local aggregate = load_aggregate()
+        aggregate.list_models(ROUTES, "Bearer llm-key", {
+            ["x-provost-backend-key-ollama"] = "ollama-key",
+            ["x-provost-backend-key-openwire"] = "openwire-key",
+        })
+        assert.equals("Bearer ollama-key", upstream_auth.ollama)
+        assert.equals("Bearer llm-key", upstream_auth.vllm)
     end)
 
     it("encodes an empty listing as a JSON array", function()
@@ -488,11 +508,12 @@ describe("llm_aggregate response re-prefix", function()
 end)
 
 describe("http_policy aggregate dispatch", function()
-    local checks, set_body, signed
+    local checks, set_body, signed, set_headers, cleared
 
     -- Runs http_policy.lua for one request; returns ngx for inspection.
-    local function run(uri, body, backend_name)
-        checks, set_body, signed = {}, nil, nil
+    local function run(uri, body, backend_name, request_headers)
+        checks, set_body, signed, set_headers, cleared = {}, nil, nil, {}, {}
+        request_headers = request_headers or {}
         package.loaded.audit_body = { compact_request = function(raw) return raw end }
         package.loaded.routes = { get = function() return nil end }
         package.loaded.rules_engine = {
@@ -518,11 +539,13 @@ describe("http_policy aggregate dispatch", function()
         ngx.var = { uri = uri, request_id = "r", backend_name = backend_name }
         ngx.decode_base64 = function() return nil end
         ngx.req = {
-            get_headers = function() return {} end,
+            get_headers = function() return request_headers end,
             get_method = function() return "POST" end,
             read_body = function() end,
             get_body_data = function() return body end,
             set_body_data = function(value) set_body = value end,
+            set_header = function(name, value) set_headers[name] = value end,
+            clear_header = function(name) cleared[#cleared + 1] = name end,
         }
         load_with_env("lua/http_policy.lua", { LLM_ROUTES_JSON = ROUTES_JSON, BEDROCK_ENABLED = "true" })
         return ngx
@@ -557,10 +580,29 @@ describe("http_policy aggregate dispatch", function()
         assert.equals(body, ngx.var.req_body)
     end)
 
+    it("sends the selected backend only its own key and strips every key header", function()
+        local keys = {
+            ["x-provost-backend-key-ollama"] = "ollama-key",
+            ["x-provost-backend-key-openwire"] = "openwire-key",
+            authorization = "Bearer llm-key",
+        }
+        run("/llm/v1/chat/completions", '{"model":"ollama/gpt-oss:20b"}', nil, keys)
+        assert.equals("Bearer ollama-key", set_headers.Authorization)
+        table.sort(cleared)
+        assert.same({ "x-provost-backend-key-ollama", "x-provost-backend-key-openwire" }, cleared)
+
+        run("/llm/v1/chat/completions", '{"model":"vllm/gpt-oss:20b"}', nil, keys)
+        assert.is_nil(set_headers.Authorization)
+        assert.equals(2, #cleared)
+    end)
+
     it("leaves per-backend requests without aggregate state", function()
-        run("/llm/ollama/v1/chat/completions", '{"model":"gpt-oss:20b"}', "ollama")
+        run("/llm/ollama/v1/chat/completions", '{"model":"gpt-oss:20b"}', "ollama",
+            { ["x-provost-backend-key-ollama"] = "ollama-key" })
         assert.is_nil(ngx.ctx.llm_aggregate)
         assert.is_nil(set_body)
+        assert.same({}, set_headers)
+        assert.same({}, cleared)
         assert.equals(0, sockets_created)
     end)
 

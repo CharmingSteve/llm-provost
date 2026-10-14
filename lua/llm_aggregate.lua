@@ -34,6 +34,10 @@ local CONNECT_TIMEOUT_MS = 1000
 local MAX_JSON_BODY_BYTES = 8 * 1024 * 1024
 local MAX_SSE_EVENT_BYTES = 1024 * 1024
 local ROUTE_URL_PATTERN = "^https?://[^%s/#@]+[^%s#@]*$"
+-- Per-backend credential sent by the client, named after the route key
+-- (X-Provost-Backend-Key-openwire). config/librechat.yaml fills these from
+-- the key variables each backend used before (OPENAI_API_KEY, ...).
+local BACKEND_KEY_HEADER = "x-provost-backend-key-"
 
 local function configured_cooldown()
     local raw = os.getenv("PROVOST_BACKEND_COOLDOWN_SECONDS")
@@ -105,6 +109,38 @@ function _M.reset()
 end
 
 -- ------------------------------------------------------------------
+-- Per-backend credentials
+-- ------------------------------------------------------------------
+
+-- Authorization for one backend: the client's key header for that backend,
+-- otherwise the client's own Authorization, forwarded as before.
+function _M.backend_authorization(headers, name, authorization)
+    local key = headers and headers[BACKEND_KEY_HEADER .. name:lower()]
+    if type(key) == "table" then
+        key = key[1]
+    end
+    if type(key) == "string" and key ~= "" then
+        return "Bearer " .. key
+    end
+    return authorization
+end
+
+-- Dispatch: sends the selected backend its own key and drops every
+-- per-backend key header, so no upstream sees another backend's key.
+function _M.apply_backend_key(name)
+    local headers = ngx.req.get_headers()
+    local authorization = _M.backend_authorization(headers, name, nil)
+    for header in pairs(headers) do
+        if header:lower():sub(1, #BACKEND_KEY_HEADER) == BACKEND_KEY_HEADER then
+            ngx.req.clear_header(header)
+        end
+    end
+    if authorization then
+        ngx.req.set_header("Authorization", authorization)
+    end
+end
+
+-- ------------------------------------------------------------------
 -- Aggregate listing
 -- ------------------------------------------------------------------
 
@@ -169,13 +205,13 @@ end
 
 -- Probes all targets concurrently under one deadline, so a listing takes
 -- at most about PROBE_TIMEOUT_MS however many backends hang.
-local function probe_all(targets, authorization)
+local function probe_all(targets)
     local results = {}
     if #targets == 0 then
         return results
     end
 
-    local function run(name, url)
+    local function run(name, url, authorization)
         local ok, models, err = pcall(_M.probe, name, url, authorization)
         if not ok then
             return name, nil, probe_failure(models)
@@ -185,7 +221,7 @@ local function probe_all(targets, authorization)
 
     local threads, waiting = {}, {}
     for _, target in ipairs(targets) do
-        threads[target.name] = ngx.thread.spawn(run, target.name, target.url)
+        threads[target.name] = ngx.thread.spawn(run, target.name, target.url, target.authorization)
         waiting[#waiting + 1] = target.name
     end
     -- spawn needs a Lua function; ngx.sleep is a C builtin.
@@ -231,7 +267,8 @@ end
 
 -- Merged OpenAI listing. Same model on two backends is listed twice; the
 -- prefix tells them apart. Backends inside their cooldown are not probed.
-function _M.list_models(routes, authorization)
+-- Each probe carries that backend's key (see backend_authorization).
+function _M.list_models(routes, authorization, headers)
     if list_cache and ngx.now() < list_cache.expires then
         return list_cache.listing
     end
@@ -239,11 +276,15 @@ function _M.list_models(routes, authorization)
     local targets = {}
     for _, name in ipairs(sorted_names(routes)) do
         if not _M.is_down(name) then
-            targets[#targets + 1] = { name = name, url = routes[name] }
+            targets[#targets + 1] = {
+                name = name,
+                url = routes[name],
+                authorization = _M.backend_authorization(headers, name, authorization),
+            }
         end
     end
 
-    local results = probe_all(targets, authorization)
+    local results = probe_all(targets)
     local data = {}
     for _, target in ipairs(targets) do
         local result = results[target.name] or {}

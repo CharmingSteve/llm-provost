@@ -173,7 +173,7 @@ LLM_ROUTES_JSON={"openwire":"http://host.docker.internal:3030/v1","ollama":"http
 
 A client configured with `http://llm-provost:8000/llm/openwire/v1` therefore sends chat completions to the `openwire` URL. Add another backend by adding a unique lowercase name and an HTTP or HTTPS URL to the JSON object, then restart the proxy so OpenResty reloads its environment. Unknown backend names return HTTP 404; missing, malformed, or invalid routing configuration fails closed with HTTP 500. There is no single-backend fallback.
 
-Keep credentials in their existing environment variables, such as `OPENAI_API_KEY` and `OLLAMA_API_KEY`; do not put credentials in backend URLs. LLM requests continue through the same policy, Cognito identity extraction, four-layer ID logging, request/response audit capture, and authorization forwarding used by the original route. MCP routing remains configured separately in `mcp_routes.json`.
+Keep credentials in their existing environment variables: `OPENAI_API_KEY` for `openwire`, `OLLAMA_API_KEY` for `ollama`, and `LLM_API_KEY` for the other backends. Do not put credentials in backend URLs. LLM requests continue through the same policy, Cognito identity extraction, four-layer ID logging, request/response audit capture, and authorization forwarding used by the original route. MCP routing remains configured separately in `mcp_routes.json`.
 
 ### Aggregate Endpoint (/llm/v1)
 
@@ -199,7 +199,7 @@ backend ollama recovered
 
 Both lines are logged at nginx `warn` level, because the inbound server's `error_log` drops anything below that. The state is kept in memory per worker, so a container restart clears it. The value is read once at startup, so restart `llm-provost` after changing it. A chat request that fails because its backend is down still gets its own audit record (`PROVOST_BACKEND_DOWN`).
 
-`v1` is reserved: a backend named `v1` in `LLM_ROUTES_JSON` cannot be reached by path. The client's `Authorization` header is forwarded unchanged, to listing probes as well as chat requests. All backends behind the aggregate endpoint therefore receive the same key; use the per-backend endpoints if your backends need different keys.
+`v1` is reserved: a backend named `v1` in `LLM_ROUTES_JSON` cannot be reached by path. Each backend receives its own key, on listing probes and chat requests alike. A client sends a backend-specific key in an `X-Provost-Backend-Key-<backend>` header, named after the backend's key in `LLM_ROUTES_JSON`. A backend without such a header receives the client's `Authorization` header unchanged. On a chat request the proxy sends the selected backend only its own key and strips every `X-Provost-Backend-Key-*` header, so no upstream sees another backend's key. Keys are never written to the audit log. The LibreChat endpoint below uses the same key variables the per-backend LibreChat endpoints used before: `OPENAI_API_KEY` for `openwire`, `OLLAMA_API_KEY` for `ollama`, and `apiKey` (`LLM_API_KEY`) for Bedrock and vLLM.
 
 LibreChat needs only one custom endpoint, and this repository's `config/librechat.yaml` already contains it. Its model picker reflects which backends are currently up, and adding a backend to `LLM_ROUTES_JSON` requires no LibreChat change:
 
@@ -212,6 +212,8 @@ endpoints:
       headers:
         X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
         X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
+        X-Provost-Backend-Key-openwire: "${OPENAI_API_KEY}"
+        X-Provost-Backend-Key-ollama: "${OLLAMA_API_KEY}"
       models:
         default:
           - "bedrock/${BEDROCK_MODEL}"

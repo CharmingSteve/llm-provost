@@ -9,6 +9,6 @@ if not routes then
     return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
 end
 
-local listing = llm_aggregate.list_models(routes, ngx.var.http_authorization)
+local listing = llm_aggregate.list_models(routes, ngx.var.http_authorization, ngx.req.get_headers())
 ngx.header["Content-Type"] = "application/json"
 ngx.say(llm_aggregate.encode_listing(listing))
