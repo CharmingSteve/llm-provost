@@ -140,7 +140,7 @@ local function reject(reason, status, error_code)
             status,
             error_code,
             reason,
-            "provost_governance_error"
+            "provost_llm_to_mcp_error"
         )
     end
     local response_body = cjson.encode({

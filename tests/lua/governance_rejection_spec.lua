@@ -38,7 +38,7 @@ describe("shared governance rejection contract", function()
     it("uses the same branded response and audit structure across MCP servers", function()
         local reject = require("governance_rejection").reject
         for _, server in ipairs({
-            { code = "PROVOST_INTERVENTION", tag = "provost_api_to_mcp_error" },
+            { code = "PROVOST_INTERVENTION", tag = "provost_mcp_to_api_error" },
             { code = "PROVOST_INTERVENTION", tag = "provost_fhir_error" },
         }) do
             local detail = "blocked write"
@@ -95,7 +95,7 @@ describe("shared governance rejection contract", function()
             error = "PROVOST_INTERVENTION",
             detail = "PROVOST_INTERVENTION: blocked trade",
         }, body)
-        assert.equals("provost_api_to_mcp_error", emitted[1])
+        assert.equals("provost_mcp_to_api_error", emitted[1])
         assert.equals("PROVOST_INTERVENTION", emitted[3])
         assert.equals(body.detail, emitted[4])
         assert.same(body, cjson.decode(emitted[5].resp_body))

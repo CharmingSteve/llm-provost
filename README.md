@@ -291,7 +291,7 @@ Configure S3 with `S3_BUCKET`, `AWS_REGION`, optional `S3_KEY_PREFIX` (with a tr
 
 Access records are ingested once, from the nginx access files (`/var/run/provost/llm-access.log` for inbound port 8000, `/var/run/provost/mcp-api-access.log` for outbound port 8081). Syslog datagrams drop large records, so they are not used for access records. Fluent Bit's tail input accepts lines up to 1 MB.
 
-Interventions write to both directories. A request blocked by policy (for example, a controlled-substance order over the supply cap) produces an access record with the HTTP status (`403`) under `access/`, and an error record with `error_code` and `error_detail` (the `PROVOST_INTERVENTION:` reason) under `error/`. Both records share the same `request_id`.
+Interventions write to both directories. A request blocked by policy (for example, a controlled-substance order over the supply cap) produces an access record with the HTTP status (`403`) under `access/`, and an error record with `error_code` and `error_detail` (the `PROVOST_INTERVENTION:` reason) under `error/`. Both records share the same `request_id`. Every 403 intervention uses `error_code` `PROVOST_INTERVENTION`. The error record's `stream_tag` names the boundary that blocked it: `provost_llm_to_mcp_error` (inbound `/llm` and `/mcp` rules), `provost_mcp_to_api_error` (Alpaca API calls), or `provost_fhir_error` (FHIR API calls).
 
 ### Reasoning Display
 
