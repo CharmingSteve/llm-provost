@@ -90,7 +90,10 @@ services:
     image: ${FLUENT_BIT_IMAGE}
     pull_policy: if_not_present
     container_name: fluent-bit
-    command: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.conf"]
+    # entrypoint.sh picks fluent-bit-debug.conf (adds the stdout tee) when
+    # PROVOST_LOG_DEBUG=true; recreate the container after changing it.
+    entrypoint: ["/bin/sh", "/fluent-bit/etc/entrypoint.sh"]
+    command: []
     volumes:
       - ./fluent-bit:/fluent-bit/etc:ro
       - provost_run:/var/run/provost
@@ -106,6 +109,7 @@ services:
       INSTANCE_ID: ${INSTANCE_ID:-local-dev}
       TZ: ${TZ:-Asia/Jerusalem}
       CI_TESTING: ${CI_TESTING:-false}
+      PROVOST_LOG_DEBUG: ${PROVOST_LOG_DEBUG:-false}
     healthcheck:
       test: ["CMD", "/fluent-bit/bin/fluent-bit", "--version"]
       interval: 5s

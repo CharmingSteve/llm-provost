@@ -65,8 +65,7 @@ function _M.emit_chunk(resp_body, chunk)
         log_type = "access",
     }
     local encoded = cjson.encode(transport_record)
-    local stdout_record = cjson.encode(record)
-    if not encoded or not stdout_record then
+    if not encoded then
         return nil, "unable to encode streaming access record"
     end
 
@@ -74,8 +73,6 @@ function _M.emit_chunk(resp_body, chunk)
     if not bytes or bytes == 0 then
         return nil, err or "streaming access logger dropped record"
     end
-    io.stdout:write(stdout_record .. "\n")
-    io.stdout:flush()
     return true
 end
 
