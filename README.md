@@ -284,6 +284,7 @@ Every audit record is enriched and serialized once in Fluent Bit, then fanned ou
 | S3 (primary) | Durable audit store | `s3://$S3_BUCKET/${S3_KEY_PREFIX}llm-provost/logs/{access,error}/YYYY/MM/DD/HH/` |
 | Local file | Copy on disk that does not depend on S3 delivery | `logs/fluent-bit-storage/access.log` and `error.log` |
 | stdout (debug tee) | Off by default; `PROVOST_LOG_DEBUG=true` | `docker compose logs fluent-bit` |
+| Model listings only | Debug tier only; never S3 or the local file | `docker compose logs fluent-bit`, when `PROVOST_LOG_DEBUG=true` |
 
 Configure S3 with `S3_BUCKET`, `AWS_REGION`, optional `S3_KEY_PREFIX` (with a trailing slash), and either `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (plus `AWS_SESSION_TOKEN` for temporary credentials) or an instance role. Fluent Bit only receives Provost records: the nginx access files, the nginx syslog socket, and the internal audit TCP inputs. No other container's logs reach S3.
 
@@ -291,7 +292,14 @@ Configure S3 with `S3_BUCKET`, `AWS_REGION`, optional `S3_KEY_PREFIX` (with a tr
 
 Access records are ingested once, from the nginx access files (`/var/run/provost/llm-access.log` for inbound port 8000, `/var/run/provost/mcp-api-access.log` for outbound port 8081). Syslog datagrams drop large records, so they are not used for access records. Fluent Bit's tail input accepts lines up to 1 MB.
 
-Model listings are not audit records. A successful `GET /llm/<backend>/v1/models` (and the aggregate `/llm/v1/models`, once it exists) is UI polling: it has no body, no rule evaluation and no choice. `filter-admin-route.conf` re-tags it to `provost.admin.models`, which neither S3 nor the local file matches, so it appears only in the debug tee. A listing that fails (4xx/5xx) is an error and stays in S3. The model a request actually used is recorded in `request_body.model` on its chat completion record.
+**Model listings are debug-only and never reach S3 or the local file.**
+
+- A successful `GET /llm/<backend>/v1/models` (and the aggregate `/llm/v1/models`, once it exists) is UI polling, not a governed event. It has no body, no rule evaluation, and no choice.
+- With `PROVOST_LOG_DEBUG=true`, each listing appears in `docker compose logs fluent-bit`. It does not appear in `docker compose logs llm-provost` or `docker compose logs api`.
+- With `PROVOST_LOG_DEBUG` unset or `false` (the default), listings are not written anywhere.
+- `filter-admin-route.conf` re-tags them to `provost.admin.models`. Neither the S3 output nor the local file output matches that tag.
+- A listing that fails (4xx/5xx) is an error, so it stays in S3 with its access record.
+- The model a request actually used is recorded in `request_body.model` on its chat completion record. That is the record to query for model choice.
 
 Interventions write to both directories. A request blocked by policy (for example, a controlled-substance order over the supply cap) produces an access record with the HTTP status (`403`) under `access/`, and an error record with `error_code` and `error_detail` (the `PROVOST_INTERVENTION:` reason) under `error/`. Both records share the same `request_id`. Every 403 intervention uses `error_code` `PROVOST_INTERVENTION`. The error record's `stream_tag` names the boundary that blocked it: `provost_llm_to_mcp_error` (inbound `/llm` and `/mcp` rules), `provost_mcp_to_api_error` (Alpaca API calls), or `provost_fhir_error` (FHIR API calls).
 
