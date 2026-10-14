@@ -124,7 +124,8 @@ def test_every_sink_receives_the_same_encoded_records() -> None:
 		for name, config in sinks.items():
 			assert re.search(rf"Match\s+{re.escape(pattern)}\n", config), (name, pattern)
 	assert sinks["output-s3.conf"].count("log_key               schema_json") == 2
-	assert sinks["output-stdout-debug.conf"].count("Template  {schema_json}") == 2
+	# The third tee template carries provost.admin.* model listings (#30).
+	assert sinks["output-stdout-debug.conf"].count("Template  {schema_json}") == 3
 	assert "output-stdout-debug.conf" not in fluent_config
 	assert "@INCLUDE fluent-bit.conf" in debug_config
 	assert "@INCLUDE conf.d/output-stdout-debug.conf" in debug_config
@@ -164,3 +165,38 @@ def test_streaming_access_input_uses_internal_json_transport() -> None:
 	assert 'log_type = "access"' in audit_access
 	assert "function _M.emit_error" in audit_access
 	assert '"5141:' not in compose
+
+def test_model_listings_reach_only_the_debug_tee() -> None:
+	"""Successful GET */v1/models listings are re-tagged out of S3 and the local file (#30)."""
+	fluent_config = (ROOT_DIR / "fluent-bit" / "fluent-bit.conf").read_text(encoding="utf-8")
+	route = fluent_conf("filter-admin-route.conf")
+	includes = re.findall(r"@INCLUDE conf\.d/(\S+)", fluent_config)
+	assert includes.index("filter-parse-access.conf") < includes.index("filter-admin-route.conf")
+	assert includes.index("filter-admin-route.conf") < includes.index("filter-append-hour.conf")
+
+	rule = re.search(r"Rule\s+\$message\s+(\S+)\s+provost\.admin\.models\s+false\n", route)
+	assert rule, "model-list rewrite_tag rule not found"
+	pattern = re.compile(rule.group(1))
+
+	def line(request: str, status: str) -> str:
+		return json.dumps(
+			{"time_local": "14/Oct/2026:13:27:35 +0000", "remote_addr": "172.18.0.4",
+			 "request": request, "status": status, "request_body": ""},
+			separators=(",", ":"),
+		)
+
+	for request in ("GET /llm/bedrock/v1/models HTTP/1.1", "GET /llm/v1/models HTTP/1.1"):
+		assert pattern.search(line(request, "200")), request
+	for request, status in (
+		("GET /llm/bedrock/v1/models HTTP/1.1", "401"),
+		("GET /llm/bedrock/v1/models HTTP/1.1", "502"),
+		("POST /llm/bedrock/v1/chat/completions HTTP/1.1", "200"),
+		("POST /mcp/fhir/ HTTP/1.1", "202"),
+	):
+		assert not pattern.search(line(request, status)), (request, status)
+
+	assert re.search(r"Match\s+provost\.admin\.\*\n", fluent_conf("filter-encode.conf"))
+	assert re.search(r"Match\s+provost\.admin\.\*\n", fluent_conf("output-stdout-debug.conf"))
+	for name in ("output-s3.conf", "output-local-file.conf"):
+		assert "provost.admin" not in fluent_conf(name)
+		assert not re.search(r"Match\s+(provost\.\*|\*)\s*\n", fluent_conf(name))
