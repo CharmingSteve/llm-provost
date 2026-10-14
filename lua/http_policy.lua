@@ -133,7 +133,7 @@ end
 
 local function reject(reason, status, error_code)
     status = status or ngx.HTTP_FORBIDDEN
-    error_code = error_code or "GOVERNANCE_VIOLATION"
+    error_code = error_code or "PROVOST_INTERVENTION"
     if status == ngx.HTTP_FORBIDDEN then
         return governance_rejection.reject(
             ngx,

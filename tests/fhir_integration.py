@@ -243,13 +243,13 @@ def main():
             status, denied = tool(name, {"type": "Patient", "id": PATIENT["id"],
                                         "payload": PATIENT}, 99)
             assert_governance_rejection(
-                status, denied, "GOVERNANCE_VIOLATION", "allowlist"
+                status, denied, "PROVOST_INTERVENTION", "allowlist"
             )
         status, denied = tool("create", {"type": "Patient", "payload": PATIENT}, 99)
         assert_governance_rejection(
             status,
             denied,
-            "GOVERNANCE_VIOLATION",
+            "PROVOST_INTERVENTION",
             "resource type not allowed for write: Patient",
         )
         for supply, reason in (
@@ -260,7 +260,7 @@ def main():
             status, denied = tool("create", {"type": "MedicationRequest",
                                              "payload": medication("OxyContin 10 mg", supply)}, 99)
             assert_governance_rejection(
-                status, denied, "GOVERNANCE_VIOLATION", reason
+                status, denied, "PROVOST_INTERVENTION", reason
             )
 
         # The second boundary must also block direct REST writes, not just tools.
