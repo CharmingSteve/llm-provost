@@ -88,14 +88,14 @@ local function reject(detail)
         ngx.HTTP_FORBIDDEN,
         "PROVOST_INTERVENTION",
         detail,
-        "provost_api_to_mcp_error"
+        "provost_mcp_to_api_error"
     )
 end
 
 -- 429 reject used when the upstream rate-limit budget is exhausted.
 function _M.reject_upstream_budget(error_code, detail)
     local audit_error = require("audit_error")
-    audit_error.emit("provost_api_to_mcp_error", 429, error_code, detail, {
+    audit_error.emit("provost_mcp_to_api_error", 429, error_code, detail, {
         request_id = ngx.var.provost_req_id,
     })
     ngx.status = 429

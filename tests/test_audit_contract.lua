@@ -217,7 +217,7 @@ describe("Phase 4 audit contract", function()
         }
         local environment = setmetatable({ngx = mock_ngx}, {__index = _G})
         local audit = load_with_environment("lua/audit_error.lua", environment)
-        audit.emit("provost_governance_error", 403, "GOVERNANCE_VIOLATION", "blocked")
+        audit.emit("provost_llm_to_mcp_error", 403, "PROVOST_INTERVENTION", "blocked")
 
         assert.truthy(emitted:find("PROVOST_AUDIT_ERROR ", 1, true))
         assert.is_true(#emitted < 3000)

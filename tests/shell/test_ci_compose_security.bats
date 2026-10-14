@@ -79,11 +79,28 @@
 @test "Fluent Bit tails finalized proxy access records from the shared runtime volume" {
   run grep -F 'access_log /var/run/provost/llm-access.log json_full;' default.conf
   [ "$status" -eq 0 ]
+  run grep -F 'access_log /var/run/provost/mcp-api-access.log json_full;' default.conf
+  [ "$status" -eq 0 ]
   run grep -E '^\s*Name\s+tail$' fluent-bit/conf.d/input-syslog.conf
   [ "$status" -eq 0 ]
   run grep -F 'Path                  /var/run/provost/llm-access.log' fluent-bit/conf.d/input-syslog.conf
   [ "$status" -eq 0 ]
+  run grep -F 'Path                  /var/run/provost/mcp-api-access.log' fluent-bit/conf.d/input-syslog.conf
+  [ "$status" -eq 0 ]
   run grep -F 'Read_from_Head        true' fluent-bit/conf.d/input-syslog.conf
+  [ "$status" -eq 0 ]
+}
+
+@test "proxy access logs reach docker logs only through the PROVOST_LOG_DEBUG tee" {
+  run grep -F 'access_log /dev/stdout' default.conf
+  [ "$status" -ne 0 ]
+  run grep -F 'io.stdout' lua/audit_access.lua
+  [ "$status" -ne 0 ]
+  run grep -E '^\s*PROVOST_LOG_DEBUG:\s*\$\{PROVOST_LOG_DEBUG:-false\}$' docker-compose.yml
+  [ "$status" -eq 0 ]
+  run grep -F 'entrypoint: ["/bin/sh", "/fluent-bit/etc/entrypoint.sh"]' docker-compose.yml
+  [ "$status" -eq 0 ]
+  run grep -F 'config=/fluent-bit/etc/fluent-bit-debug.conf' fluent-bit/entrypoint.sh
   [ "$status" -eq 0 ]
 }
 

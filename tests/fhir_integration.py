@@ -142,18 +142,32 @@ def patients(payload):
     return []
 
 
-def audit_lines():
-    # nginx creates the log on startup; the stack may still be booting.
+AUDIT_FILES = (
+    Path("/var/run/provost/llm-access.log"),
+    Path("/var/run/provost/mcp-api-access.log"),
+)
+
+
+def read_audit_file(path):
+    # nginx creates the logs on startup; the stack may still be booting.
     try:
-        return Path("/var/run/provost/llm-access.log").read_text().splitlines()
+        return path.read_text().splitlines()
     except FileNotFoundError:
         return []
+
+
+def audit_offsets():
+    # Inbound (8000) and outbound (8081) records live in separate files, so
+    # the start marker is a line count per file.
+    return {path: len(read_audit_file(path)) for path in AUDIT_FILES}
 
 
 def wait_for_audit(predicate, start_line, inbound=False):
     for _ in range(60):
         records = []
-        for line in audit_lines()[start_line:]:
+        lines = [line for path in AUDIT_FILES
+                 for line in read_audit_file(path)[start_line.get(path, 0):]]
+        for line in lines:
             try:
                 records.append(json.loads(line))
             except json.JSONDecodeError:
@@ -169,7 +183,7 @@ def wait_for_audit(predicate, start_line, inbound=False):
 
 def main():
     live = "--live" in sys.argv
-    start_line = len(audit_lines())
+    start_line = audit_offsets()
     server = None
     if not live:
         server = ThreadingHTTPServer(("127.0.0.1", 18089), FHIRMock)
@@ -229,13 +243,13 @@ def main():
             status, denied = tool(name, {"type": "Patient", "id": PATIENT["id"],
                                         "payload": PATIENT}, 99)
             assert_governance_rejection(
-                status, denied, "GOVERNANCE_VIOLATION", "allowlist"
+                status, denied, "PROVOST_INTERVENTION", "allowlist"
             )
         status, denied = tool("create", {"type": "Patient", "payload": PATIENT}, 99)
         assert_governance_rejection(
             status,
             denied,
-            "GOVERNANCE_VIOLATION",
+            "PROVOST_INTERVENTION",
             "resource type not allowed for write: Patient",
         )
         for supply, reason in (
@@ -246,7 +260,7 @@ def main():
             status, denied = tool("create", {"type": "MedicationRequest",
                                              "payload": medication("OxyContin 10 mg", supply)}, 99)
             assert_governance_rejection(
-                status, denied, "GOVERNANCE_VIOLATION", reason
+                status, denied, "PROVOST_INTERVENTION", reason
             )
 
         # The second boundary must also block direct REST writes, not just tools.
