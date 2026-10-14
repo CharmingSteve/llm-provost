@@ -12,6 +12,19 @@ endpoints:
 #     fetch: true
 
   custom:
+    # One endpoint for every backend in LLM_ROUTES_JSON: the picker lists
+    # prefixed ids (bedrock/..., ollama/...) from the backends that are up.
+    - name: "Provost"
+      apiKey: "${LLM_API_KEY}"
+      baseURL: "http://llm-provost:8000/llm/v1"
+      headers:
+        X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+        X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
+      models:
+        default:
+          - "bedrock/${BEDROCK_MODEL}"
+        fetch: true
+
     - name: "OpenWire"
       apiKey: "${OPENAI_API_KEY}"
       baseURL: "http://llm-provost:8000/llm/openwire/v1"

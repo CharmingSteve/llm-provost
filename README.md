@@ -164,6 +164,7 @@ In this repository, example integration is shown in [config/librechat.yaml](conf
 - Ollama traffic is routed through http://llm-provost:8000/llm/ollama/v1
 - vLLM traffic is routed through http://llm-provost:8000/llm/vllm/v1
 - Amazon Bedrock traffic is routed through http://llm-provost:8000/llm/bedrock/v1
+- All of the above are also reachable through the single aggregate endpoint http://llm-provost:8000/llm/v1 (see [Aggregate Endpoint](#aggregate-endpoint-llmv1))
 - MCP tool traffic is routed through /mcp/<server>
 
 ### Multiple LLM Backends
@@ -177,6 +178,51 @@ LLM_ROUTES_JSON={"openwire":"http://host.docker.internal:3030/v1","ollama":"http
 A client configured with `http://llm-provost:8000/llm/openwire/v1` therefore sends chat completions to the `openwire` URL. Add another backend by adding a unique lowercase name and an HTTP or HTTPS URL to the JSON object, then restart the proxy so OpenResty reloads its environment. Unknown backend names return HTTP 404; missing, malformed, or invalid routing configuration fails closed with HTTP 500. There is no single-backend fallback.
 
 Keep credentials in their existing environment variables, such as `OPENAI_API_KEY` and `OLLAMA_API_KEY`; do not put credentials in backend URLs. LLM requests continue through the same policy, Cognito identity extraction, four-layer ID logging, request/response audit capture, and authorization forwarding used by the original route. MCP routing remains configured separately in `mcp_routes.json`.
+
+### Aggregate Endpoint (/llm/v1)
+
+`/llm/v1` is one OpenAI-compatible base URL for every backend in `LLM_ROUTES_JSON`. The backend is selected by the model id instead of the path. Each id is prefixed with its backend's key in `LLM_ROUTES_JSON`, so the namespace comes from your config, not from the code:
+
+- `GET /llm/v1/models` asks every backend for its models, about 2.5 seconds at most, all in parallel. It merges the answers into one list: `bedrock/openai.gpt-oss-20b-1:0`, `ollama/gpt-oss:20b`, and so on. If two backends serve the same model, it appears once per backend. A backend that does not answer is left out of the list without an error. Each worker caches the merged list for 45 seconds.
+- `POST /llm/v1/chat/completions` (and any other `/llm/v1/*` call) reads `model` from the body and splits it on the **first** `/`. The part before the slash selects the backend. The upstream receives the rest unchanged, so `ollama/library/llama3:8b` is sent as `library/llama3:8b`. After that, the request goes through exactly the same rules engine, audit capture, and Bedrock SigV4 signing as `/llm/<backend>/v1/*`. The audit record's `request_body` keeps the prefixed id the user selected. The response's `model` field is rewritten back to the prefixed id for the client only; like `REASONING_DISPLAY`, this runs after audit capture, so `resp_body` keeps the upstream's id.
+
+Errors use the OpenAI error shape `{"error":{"code":...,"message":...,"type":...}}`:
+
+| Code | Status | When |
+| --- | --- | --- |
+| `LLM_MODEL_UNPREFIXED` | 400 | `model` is missing or has no `<backend>/` prefix. The proxy never guesses a default backend. |
+| `LLM_BACKEND_UNKNOWN` | 404 | The prefix is not a key in `LLM_ROUTES_JSON`. |
+| `PROVOST_BACKEND_DOWN` | 503 | The backend is in its cooldown, or a 1-second TCP connect test fails. The request fails immediately instead of being proxied into a hang. |
+
+**Backend cooldown.** When a listing probe or a dispatch connect test fails, the proxy marks that backend down for `PROVOST_BACKEND_COOLDOWN_SECONDS`, which defaults to `180`. This sets how long a failed backend is skipped before it is probed again. A lower value means faster recovery but more log lines when a backend keeps going up and down. While a backend is down, listings skip it at no cost, so a dead or mistyped route never slows the list, and chat requests to it get `PROVOST_BACKEND_DOWN` with no network contact. After the cooldown ends, the next listing or request probes the backend again. There is no background poller. The proxy logs only state changes, on the container's stdout (`./scripts/provost-compose.sh logs llm-provost`), never in the S3 audit log:
+
+```
+backend ollama marked down (probe timeout)
+backend ollama recovered
+```
+
+Both lines are logged at nginx `warn` level, because the inbound server's `error_log` drops anything below that. The state is kept in memory per worker, so a container restart clears it. The value is read once at startup, so restart `llm-provost` after changing it. A chat request that fails because its backend is down still gets its own audit record (`PROVOST_BACKEND_DOWN`).
+
+`v1` is reserved: a backend named `v1` in `LLM_ROUTES_JSON` cannot be reached by path. The client's `Authorization` header is forwarded unchanged, to listing probes as well as chat requests. All backends behind the aggregate endpoint therefore receive the same key; use the per-backend endpoints if your backends need different keys.
+
+LibreChat needs only one custom endpoint. Its model picker reflects which backends are currently up:
+
+```yaml
+endpoints:
+  custom:
+    - name: "Provost"
+      apiKey: "${LLM_API_KEY}"
+      baseURL: "http://llm-provost:8000/llm/v1"
+      headers:
+        X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+        X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
+      models:
+        default:
+          - "bedrock/${BEDROCK_MODEL}"
+        fetch: true
+```
+
+The per-backend endpoints `/llm/<backend>/v1/*` keep working unchanged.
 
 ### vLLM
 
@@ -294,7 +340,7 @@ Access records are ingested once, from the nginx access files (`/var/run/provost
 
 **Model listings are debug-only and never reach S3 or the local file.**
 
-- A successful `GET /llm/<backend>/v1/models` (and the aggregate `/llm/v1/models`, once it exists) is UI polling, not a governed event. It has no body, no rule evaluation, and no choice.
+- A successful `GET /llm/<backend>/v1/models` (and the aggregate `GET /llm/v1/models`) is UI polling, not a governed event. It has no body, no rule evaluation, and no choice.
 - With `PROVOST_LOG_DEBUG=true`, each listing appears in `./scripts/provost-compose.sh logs fluent-bit`. It does not appear in `./scripts/provost-compose.sh logs llm-provost` or `./scripts/provost-compose.sh logs api`.
 - To show only successful listings: `./scripts/provost-compose.sh logs fluent-bit | grep 'v1/models' | grep 'status\\":\\"200'`. The wrapper follows the log (`logs -f`), so stop it with Ctrl-C.
 - With `PROVOST_LOG_DEBUG` unset or `false` (the default), listings are not written anywhere.
