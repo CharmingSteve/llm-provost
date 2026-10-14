@@ -12,8 +12,9 @@ endpoints:
 #     fetch: true
 
   custom:
-    # One endpoint for every backend in LLM_ROUTES_JSON: the picker lists
-    # prefixed ids (bedrock/..., ollama/...) from the backends that are up.
+    # The only LibreChat endpoint: every backend in LLM_ROUTES_JSON, listed
+    # from the backends that are up with a prefix naming the source
+    # (bedrock/..., ollama/..., vllm/...). Add a backend there, not here.
     - name: "Provost"
       apiKey: "${LLM_API_KEY}"
       baseURL: "http://llm-provost:8000/llm/v1"
@@ -25,54 +26,6 @@ endpoints:
           - "bedrock/${BEDROCK_MODEL}"
         fetch: true
 
-    - name: "OpenWire"
-      apiKey: "${OPENAI_API_KEY}"
-      baseURL: "http://llm-provost:8000/llm/openwire/v1"
-      headers:
-        X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
-        X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
-      model_parameters:
-        maxContextTokens: 128000
-      maxContextTokens: 128000
-      models:
-        default:
-          - "gpt-5-mini"
-        fetch: true
-
-    - name: "Ollama"
-      apiKey: "${OLLAMA_API_KEY}"
-      baseURL: "http://llm-provost:8000/llm/ollama/v1"
-      headers:
-        X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
-        X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
-      models:
-        default:
-          - "llama3.1:8b"
-        fetch: true
-
-    - name: "Bedrock via Provost"
-      apiKey: "${LLM_API_KEY}"
-      baseURL: "http://llm-provost:8000/llm/bedrock/v1"
-      headers:
-        X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
-        X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
-      models:
-        default:
-          - "${BEDROCK_MODEL}"
-        fetch: true
-        
-    - name: "vLLM"
-      apiKey: "${LLM_API_KEY}"
-      baseURL: "http://llm-provost:8000/llm/vllm/v1"
-      headers:
-        X-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
-        X-Cognito-User: "{{LIBRECHAT_USER_ID}}"
-      models:
-        default:
-          - "<your-vllm-model-id>"
-        fetch: true
-
-    
 interface:
   mcpServers:
     use: true

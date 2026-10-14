@@ -158,13 +158,9 @@ docker compose --env-file .env.versions down
 The current POC wiring uses OpenWire from VS Code/OpenAI-compatible client flows, but you are not locked into that.
 Any client that can call an OpenAI-compatible endpoint and/or MCP endpoint through LLM Provost can be used.
 
-In this repository, example integration is shown in [config/librechat.yaml](config/librechat.yaml) where:
+In this repository, [config/librechat.yaml](config/librechat.yaml) defines one LLM endpoint, `Provost`, which points at the aggregate endpoint `http://llm-provost:8000/llm/v1`. Every backend in `LLM_ROUTES_JSON` appears in its model picker, prefixed with the backend name (for example `ollama/gpt-oss:20b` or `bedrock/openai.gpt-oss-20b-1:0`). Backends that are down are left out. See [Aggregate Endpoint](#aggregate-endpoint-llmv1).
 
-- OpenWire traffic is routed through http://llm-provost:8000/llm/openwire/v1
-- Ollama traffic is routed through http://llm-provost:8000/llm/ollama/v1
-- vLLM traffic is routed through http://llm-provost:8000/llm/vllm/v1
-- Amazon Bedrock traffic is routed through http://llm-provost:8000/llm/bedrock/v1
-- All of the above are also reachable through the single aggregate endpoint http://llm-provost:8000/llm/v1 (see [Aggregate Endpoint](#aggregate-endpoint-llmv1))
+- Chat traffic from LibreChat goes through http://llm-provost:8000/llm/v1
 - MCP tool traffic is routed through /mcp/<server>
 
 ### Multiple LLM Backends
@@ -205,7 +201,7 @@ Both lines are logged at nginx `warn` level, because the inbound server's `error
 
 `v1` is reserved: a backend named `v1` in `LLM_ROUTES_JSON` cannot be reached by path. The client's `Authorization` header is forwarded unchanged, to listing probes as well as chat requests. All backends behind the aggregate endpoint therefore receive the same key; use the per-backend endpoints if your backends need different keys.
 
-LibreChat needs only one custom endpoint. Its model picker reflects which backends are currently up:
+LibreChat needs only one custom endpoint, and this repository's `config/librechat.yaml` already contains it. Its model picker reflects which backends are currently up, and adding a backend to `LLM_ROUTES_JSON` requires no LibreChat change:
 
 ```yaml
 endpoints:
@@ -222,7 +218,7 @@ endpoints:
         fetch: true
 ```
 
-The per-backend endpoints `/llm/<backend>/v1/*` keep working unchanged.
+The per-backend routes `/llm/<backend>/v1/*` still work for clients that need a single backend, but LibreChat does not use them.
 
 ### vLLM
 
@@ -232,11 +228,11 @@ vLLM needs no dedicated code: it is a named backend like `openwire` and `ollama`
 LLM_ROUTES_JSON={"vllm":"http://vllm-host:8000/v1"}
 ```
 
-Then set the served model ID in the "vLLM" entry of [config/librechat.yaml](config/librechat.yaml) (replace `<your-vllm-model-id>`); `fetch: true` lists models from the server's `/v1/models`. Clients, or LibreChat, call `http://llm-provost:8000/llm/vllm/v1`. Until a `vllm` route exists the proxy returns HTTP 404 for that path. If your vLLM server was started with `--api-key`, pass the same key as the client API key; the `Authorization` header is forwarded unchanged. Requests pass through the same policy, identity extraction, audit capture and four-layer logging as every other backend, and are never SigV4-signed.
+No LibreChat change is needed: the models from the server's `/v1/models` appear in the `Provost` picker as `vllm/<model-id>`. Clients can call `http://llm-provost:8000/llm/v1` with `vllm/<model-id>` as the model, or `http://llm-provost:8000/llm/vllm/v1` directly. Until a `vllm` route exists, the per-backend path returns HTTP 404. If your vLLM server was started with `--api-key`, pass the same key as the client API key; the `Authorization` header is forwarded unchanged. Requests pass through the same policy, identity extraction, audit capture and four-layer logging as every other backend, and are never SigV4-signed.
 
 ### Amazon Bedrock
 
-Enable LibreChat's Bedrock-via-Provost custom endpoint with the following root `.env` values:
+Bedrock models appear in LibreChat's `Provost` picker as `bedrock/<model-id>`. Set the following root `.env` values; `BEDROCK_MODEL` is the model LibreChat selects by default:
 
 ```sh
 BEDROCK_ENABLED=true
@@ -244,7 +240,7 @@ BEDROCK_AWS_DEFAULT_REGION=us-east-1
 BEDROCK_MODEL=openai.gpt-oss-20b-1:0
 ```
 
-LibreChat sends Bedrock requests only to `http://llm-provost:8000/llm/bedrock/v1`. The proxy applies its rules and audit capture first, then SigV4-signs the approved request to `bedrock-runtime.<region>.amazonaws.com` (`/openai/v1/...`) without recording credentials or signing headers. Choose a model that supports Amazon Bedrock's OpenAI-compatible Chat Completions API; the default is verified against that API.
+LibreChat sends Bedrock requests to `http://llm-provost:8000/llm/v1` with a `bedrock/` model id. The proxy applies its rules and audit capture first, then SigV4-signs the approved request to `bedrock-runtime.<region>.amazonaws.com` (`/openai/v1/...`) without recording credentials or signing headers. Choose a model that supports Amazon Bedrock's OpenAI-compatible Chat Completions API; the default is verified against that API.
 
 - **Region:** `BEDROCK_AWS_DEFAULT_REGION`, then `AWS_REGION`, then `us-east-1`. The signed host is derived from the region; the `bedrock` URL in `LLM_ROUTES_JSON` must still be present and valid.
 - **Credentials:** `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (and optional `AWS_SESSION_TOKEN`) in the proxy environment, otherwise the shared credentials file mounted read-only from `~/.aws` (change the host directory with `AWS_SHARED_CREDENTIALS_DIR`, pick a profile with `AWS_PROFILE`, default `default`). ECS/EKS task credentials and EC2 instance metadata are not resolved by the proxy yet. Credentials are cached for 5 minutes and dropped immediately when Bedrock returns 401/403.
