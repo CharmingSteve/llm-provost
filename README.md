@@ -283,19 +283,20 @@ Every audit record is enriched and serialized once in Fluent Bit, then fanned ou
 |------|------|----------|
 | S3 (primary) | Durable audit store | `s3://$S3_BUCKET/${S3_KEY_PREFIX}llm-provost/logs/{access,error}/YYYY/MM/DD/HH/` |
 | Local file | Copy on disk that does not depend on S3 delivery | `logs/fluent-bit-storage/access.log` and `error.log` |
-| stdout (debug tee) | Off by default; `PROVOST_LOG_DEBUG=true` | `docker compose logs fluent-bit` |
-| Model listings only | Debug tier only; never S3 or the local file | `docker compose logs fluent-bit`, when `PROVOST_LOG_DEBUG=true` |
+| stdout (debug tee) | Off by default; `PROVOST_LOG_DEBUG=true` | `./scripts/provost-compose.sh logs fluent-bit` |
+| Model listings only | Debug tier only; never S3 or the local file | `./scripts/provost-compose.sh logs fluent-bit`, when `PROVOST_LOG_DEBUG=true` |
 
 Configure S3 with `S3_BUCKET`, `AWS_REGION`, optional `S3_KEY_PREFIX` (with a trailing slash), and either `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (plus `AWS_SESSION_TOKEN` for temporary credentials) or an instance role. Fluent Bit only receives Provost records: the nginx access files, the nginx syslog socket, and the internal audit TCP inputs. No other container's logs reach S3.
 
-`PROVOST_LOG_DEBUG` is read when the `fluent-bit` container starts. After changing it, recreate the container (`docker compose up -d --force-recreate fluent-bit`). Audit records are not written to the proxy's own stdout in either mode. The only exception is nginx's `error_log /dev/stderr`, which still prints `PROVOST_AUDIT_ERROR` lines to `docker compose logs llm-provost`.
+`PROVOST_LOG_DEBUG` is read when the `fluent-bit` container starts. After changing it, recreate the container (`./scripts/provost-compose.sh up fluent-bit`). Audit records are not written to the proxy's own stdout in either mode. The only exception is nginx's `error_log /dev/stderr`, which still prints `PROVOST_AUDIT_ERROR` lines to `./scripts/provost-compose.sh logs llm-provost`.
 
 Access records are ingested once, from the nginx access files (`/var/run/provost/llm-access.log` for inbound port 8000, `/var/run/provost/mcp-api-access.log` for outbound port 8081). Syslog datagrams drop large records, so they are not used for access records. Fluent Bit's tail input accepts lines up to 1 MB.
 
 **Model listings are debug-only and never reach S3 or the local file.**
 
 - A successful `GET /llm/<backend>/v1/models` (and the aggregate `/llm/v1/models`, once it exists) is UI polling, not a governed event. It has no body, no rule evaluation, and no choice.
-- With `PROVOST_LOG_DEBUG=true`, each listing appears in `docker compose logs fluent-bit`. It does not appear in `docker compose logs llm-provost` or `docker compose logs api`.
+- With `PROVOST_LOG_DEBUG=true`, each listing appears in `./scripts/provost-compose.sh logs fluent-bit`. It does not appear in `./scripts/provost-compose.sh logs llm-provost` or `./scripts/provost-compose.sh logs api`.
+- To show only successful listings: `./scripts/provost-compose.sh logs fluent-bit | grep 'v1/models' | grep 'status\\":\\"200'`. The wrapper follows the log (`logs -f`), so stop it with Ctrl-C.
 - With `PROVOST_LOG_DEBUG` unset or `false` (the default), listings are not written anywhere.
 - `filter-admin-route.conf` re-tags them to `provost.admin.models`. Neither the S3 output nor the local file output matches that tag.
 - A listing that fails (4xx/5xx) is an error, so it stays in S3 with its access record.
