@@ -144,14 +144,12 @@ local function reject(reason, status, error_code)
         )
     end
     local response_body = cjson.encode({
-        error = status == ngx.HTTP_FORBIDDEN
-            and "Governance rule violation"
-            or "Request processing failed",
+        error = "Request processing failed",
         reason = reason,
     })
     ngx.var.resp_body = response_body
     audit_error.emit(
-        status == ngx.HTTP_FORBIDDEN and "provost_governance_error" or "provost_request_error",
+        "provost_request_error",
         status,
         error_code,
         reason,
