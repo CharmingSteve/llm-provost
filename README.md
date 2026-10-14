@@ -267,13 +267,31 @@ See [RULES_ENGINE.md](RULES_ENGINE.md) for full rule documentation.
 
 LLM Provost emits structured JSON logs with request and response body capture for governed paths.
 The proxy resolves `user_id` from `X-Cognito-User` when LibreChat forwards an authenticated user email, and falls back to the Cognito JWT `sub` or email claim when needed.
-In the default stack, Fluent Bit ships logs to local files and optional S3 outputs.
+In the default stack, Fluent Bit ships every audit record to S3 (the primary sink) and keeps a local copy on disk; see [Audit Log Pipeline](#audit-log-pipeline).
 
 Audit bodies use compact mode by default. JSON is minified, model lists are summarized with their count and model IDs, and recognized OpenAI-compatible, Ollama, Anthropic, Responses API, and Gemini SSE streams are reconstructed into ordered semantic records. Each response record contains at most 8 KiB of semantic text and a monotonic `chunk` index; the final record sets `complete:true`. There is no total response or record-count limit, so content, reasoning, and tool-call arguments in the middle of million-word responses remain auditable without buffering the full response in proxy memory. Malformed or oversized SSE events are preserved as bounded `unparsed_sse_payload` or `unparsed_sse_fragment` records rather than discarded.
 
-Streaming records are sent over the internal Compose network to Fluent Bit and independently mirrored to the proxy's standard output. If the bounded transport-outage queue fills, response processing fails closed instead of silently passing unaudited content. Interrupted streams retain their partial semantic records and produce a structured error record for client aborts, upstream failures, or post-header interruptions. Empty request bodies remain empty, credential-like request fields are recursively replaced with `[REDACTED]`, and repeated LibreChat conversation histories are summarized to keep request records useful.
+Streaming records are sent over the internal Compose network to Fluent Bit. If the bounded transport-outage queue fills, response processing fails closed instead of silently passing unaudited content. Interrupted streams retain their partial semantic records and produce a structured error record for client aborts, upstream failures, or post-header interruptions. Empty request bodies remain empty, credential-like request fields are recursively replaced with `[REDACTED]`, and repeated LibreChat conversation histories are summarized to keep request records useful.
 
-Set `AUDIT_LOG_MODE=raw` in the deployment environment and restart the Compose stack to retain SSE wire data in ordered bounded records for diagnostics. Raw mode is intentionally deployment-scoped and cannot be enabled with a client request header. Local enriched JSON Lines records are written to `logs/fluent-bit-storage/access.log` and `logs/fluent-bit-storage/error.log`.
+Set `AUDIT_LOG_MODE=raw` in the deployment environment and restart the Compose stack to retain SSE wire data in ordered bounded records for diagnostics. Raw mode is intentionally deployment-scoped and cannot be enabled with a client request header.
+
+### Audit Log Pipeline
+
+Every audit record is enriched and serialized once in Fluent Bit, then fanned out. All sinks receive the same JSON line, with the same schema (`schemas/access_log_schema.json`, `schemas/error_log_schema.json`):
+
+| Sink | Role | Location |
+|------|------|----------|
+| S3 (primary) | Durable audit store | `s3://$S3_BUCKET/${S3_KEY_PREFIX}llm-provost/logs/{access,error}/YYYY/MM/DD/HH/` |
+| Local file | Copy on disk that does not depend on S3 delivery | `logs/fluent-bit-storage/access.log` and `error.log` |
+| stdout (debug tee) | Off by default; `PROVOST_LOG_DEBUG=true` | `docker compose logs fluent-bit` |
+
+Configure S3 with `S3_BUCKET`, `AWS_REGION`, optional `S3_KEY_PREFIX` (with a trailing slash), and either `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (plus `AWS_SESSION_TOKEN` for temporary credentials) or an instance role. Fluent Bit only receives Provost records: the nginx access files, the nginx syslog socket, and the internal audit TCP inputs. No other container's logs reach S3.
+
+`PROVOST_LOG_DEBUG` is read when the `fluent-bit` container starts. After changing it, recreate the container (`docker compose up -d --force-recreate fluent-bit`). Audit records are not written to the proxy's own stdout in either mode. The only exception is nginx's `error_log /dev/stderr`, which still prints `PROVOST_AUDIT_ERROR` lines to `docker compose logs llm-provost`.
+
+Access records are ingested once, from the nginx access files (`/var/run/provost/llm-access.log` for inbound port 8000, `/var/run/provost/mcp-api-access.log` for outbound port 8081). Syslog datagrams drop large records, so they are not used for access records. Fluent Bit's tail input accepts lines up to 1 MB.
+
+Interventions write to both directories. A request blocked by policy (for example, a controlled-substance order over the supply cap) produces an access record with the HTTP status (`403`) under `access/`, and an error record with `error_code` and `error_detail` (the `PROVOST_INTERVENTION:` reason) under `error/`. Both records share the same `request_id`.
 
 ### Reasoning Display
 
@@ -291,9 +309,9 @@ Only the client copy is rewritten: the audit log always records the original ups
 
 ### Viewing Local Logs
 
-Run these commands from the repository root. The S3 outputs receive only the `provost.access` and `provost.error` audit streams.
+Run these commands from the repository root.
 
-Follow Fluent Bit's audit-log delivery output:
+Follow Fluent Bit's delivery output (audit records appear here only when `PROVOST_LOG_DEBUG=true`):
 
 ```sh
 ./scripts/provost-compose.sh logs --tail 100 fluent-bit
