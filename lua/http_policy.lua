@@ -2,6 +2,7 @@ local cjson = require("cjson.safe")
 local audit_body = require("audit_body")
 local audit_error = require("audit_error")
 local governance_rejection = require("governance_rejection")
+local llm_aggregate = require("llm_aggregate")
 local routes = require("routes")
 local rules_engine = require("rules_engine")
 
@@ -176,6 +177,9 @@ end
 local headers = ngx.req.get_headers()
 local uri = ngx.var.uri or ""
 local is_mcp_path = uri:match("^/mcp/") ~= nil
+-- Aggregate /llm/v1/*: the backend comes from the body's model prefix.
+local aggregate_path = not is_mcp_path and uri:match("^/llm/v1(/.*)$") or nil
+local aggregate
 
 if is_mcp_path then
     local authenticated, auth_error = valid_provost_token(headers)
@@ -241,7 +245,8 @@ ngx.ctx.user_id = user_id
 ngx.ctx.customer_id = customer_id
 ngx.var.provost_customer_id = customer_id
 
-if not is_mcp_path then
+-- The aggregate listing has no single backend; llm_models.lua fans out.
+if not is_mcp_path and aggregate_path ~= "/models" then
     if not llm_routes then
         return reject_route(
             "LLM backend routing is not configured",
@@ -253,6 +258,14 @@ if not is_mcp_path then
     local backend_name = ngx.var.backend_name
     if not backend_name and uri == "/llm/bedrock/v1/models" then
         backend_name = "bedrock"
+    end
+    if aggregate_path then
+        local resolved, status, error_code, message = llm_aggregate.resolve(body, llm_routes)
+        if not resolved then
+            return llm_aggregate.reject(status, error_code, message)
+        end
+        aggregate = resolved
+        backend_name = resolved.backend
     end
     local backend_url = backend_name and llm_routes[backend_name]
     if type(backend_url) ~= "string" then
@@ -270,7 +283,7 @@ if not is_mcp_path then
         )
     end
 
-    local backend_path = uri:match("^/llm/[^/]+/v1(.*)$")
+    local backend_path = aggregate_path or uri:match("^/llm/[^/]+/v1(.*)$")
     if backend_path == nil then
         return reject_route("Invalid LLM backend path", ngx.HTTP_NOT_FOUND, "LLM_PATH_INVALID")
     end
@@ -319,7 +332,24 @@ if not is_mcp_path then
     )
 end
 
-if not is_mcp_path and ngx.var.backend_name == "bedrock" then
+if aggregate then
+    if not llm_aggregate.ensure_available(aggregate.backend, llm_routes[aggregate.backend]) then
+        return llm_aggregate.reject(
+            ngx.HTTP_SERVICE_UNAVAILABLE,
+            "PROVOST_BACKEND_DOWN",
+            "LLM backend " .. aggregate.backend .. " is unavailable"
+        )
+    end
+    llm_aggregate.apply_backend_key(aggregate.backend)
+    -- req_body above keeps the prefixed id the user selected; only the
+    -- upstream copy carries the stripped id.
+    body = llm_aggregate.strip_model(body, aggregate)
+    ngx.req.set_body_data(body)
+    ngx.ctx.llm_aggregate = aggregate
+end
+
+if not is_mcp_path and (ngx.var.backend_name == "bedrock"
+    or (aggregate and aggregate.backend == "bedrock")) then
     local host, signing_error = require("bedrock").prepare_request(body)
     if not host then
         return reject_route(

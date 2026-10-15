@@ -163,6 +163,7 @@ services:
       LLM_ROUTES_JSON: ${LLM_ROUTES_JSON:-}
       AUDIT_LOG_MODE: ${AUDIT_LOG_MODE:-compact}
       REASONING_DISPLAY: ${REASONING_DISPLAY:-off}
+      PROVOST_BACKEND_COOLDOWN_SECONDS: ${PROVOST_BACKEND_COOLDOWN_SECONDS:-180}
       MCP_ROUTING_TABLE_PATH: /etc/nginx/mcp_routes/mcp_routes.json
       FHIR_BASE_URL: ${FHIR_BASE_URL:-http://hapi.fhir.org/baseR4}
       PROVOST_TOKEN: ${PROVOST_TOKEN:-}

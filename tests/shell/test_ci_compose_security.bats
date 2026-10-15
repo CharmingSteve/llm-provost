@@ -37,11 +37,15 @@
   [ "$status" -eq 0 ]
   run grep 'OPENAI_REVERSE_PROXY' .env .env.example docker-compose.yml
   [ "$status" -ne 0 ]
-  run grep -F 'baseURL: "http://llm-provost:8000/llm/openwire/v1"' config/librechat.yaml
+  run grep -F 'baseURL: "http://llm-provost:8000/llm/v1"' config/librechat.yaml
   [ "$status" -eq 0 ]
-  run grep -F 'baseURL: "http://llm-provost:8000/llm/bedrock/v1"' config/librechat.yaml
+  run grep -F 'name: "Provost"' config/librechat.yaml
   [ "$status" -eq 0 ]
-  run grep -F 'name: "Bedrock via Provost"' config/librechat.yaml
+  run grep -E 'llm-provost:8000/llm/(openwire|ollama|bedrock|vllm)' config/librechat.yaml
+  [ "$status" -ne 0 ]
+  run grep -F 'X-Provost-Backend-Key-openwire: "${OPENAI_API_KEY}"' config/librechat.yaml
+  [ "$status" -eq 0 ]
+  run grep -F 'X-Provost-Backend-Key-ollama: "${OLLAMA_API_KEY}"' config/librechat.yaml
   [ "$status" -eq 0 ]
   run grep -F '/home/node/.aws' docker-compose.yml
   [ "$status" -ne 0 ]
