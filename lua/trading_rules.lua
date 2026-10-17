@@ -827,18 +827,24 @@ function _M.check_request(parsed, rules, context)
     -- Requires ngx.time(); skipped when ngx is not available.
     -- ----------------------------------------------------------------
     local window_rule = rules.trading_window
-    if type(window_rule) == "table" and window_rule.enabled == true
-       and tool_matches_rule(window_rule, tool_name) then
-        if type(ngx) == "table" and type(ngx.time) == "function" then
-            local params = window_rule.params or {}
-            local start_h = tonumber(params.start_hour) or 0
-            local end_h   = tonumber(params.end_hour)   or 23
-            -- Use os.date('!*t') to get the current UTC hour correctly.
-            local hour    = os.date("!*t", ngx.time()).hour
-            if hour < start_h or hour >= end_h then
-                return true,
-                    "Trading outside allowed window " ..
-                    "(" .. start_h .. ":00-" .. end_h .. ":00 UTC)."
+    if type(window_rule) == "table" and window_rule.enabled == true then
+        local window_has_scope = type(window_rule.params) == "table"
+            and type(window_rule.params.apply_to_tools) == "table"
+        local window_tool_match = tool_matches_rule(window_rule, tool_name)
+        -- Fail closed for trading window restrictions: if tool scoping is present
+        -- but the incoming tool is unlisted/unknown, still enforce the rule.
+        if window_tool_match or window_has_scope then
+            if type(ngx) == "table" and type(ngx.time) == "function" then
+                local params = window_rule.params or {}
+                local start_h = tonumber(params.start_hour) or 0
+                local end_h   = tonumber(params.end_hour)   or 23
+                -- Use os.date('!*t') to get the current UTC hour correctly.
+                local hour    = os.date("!*t", ngx.time()).hour
+                if hour < start_h or hour >= end_h then
+                    return true,
+                        "Trading outside allowed window " ..
+                        "(" .. start_h .. ":00-" .. end_h .. ":00 UTC)."
+                end
             end
         end
     end
