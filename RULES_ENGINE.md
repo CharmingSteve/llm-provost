@@ -223,6 +223,23 @@ None of this lookup exists today. Entries added to `group_overrides` are ignored
 
 ---
 
+## Scoping Rules with `apply_to_tools`
+
+Rules may declare `params.apply_to_tools`, a list of MCP tool names the rule governs.
+
+- Missing or empty: the rule applies to all tools (backward compatible).
+- Non-empty: the rule applies only to the listed tools; other tools skip it.
+
+`controlled_substance_rules` additionally accepts `params.apply_to_resource_types`
+(for example `["MedicationRequest"]`); both the tool name and resource type must match.
+`restricted_ticker_tool_rules` previously used `params.tools`; it now uses
+`apply_to_tools` (the legacy `tools` key is still read as a fallback).
+
+Migration: add `apply_to_tools` to each rule in `rules.json` listing the tools it
+should govern, so a renamed or newly added tool is not silently covered or missed.
+
+---
+
 ## Complete Example
 
 The shipped `rules.json` includes all six required top-level fields with a generic governance example.
