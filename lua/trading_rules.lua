@@ -718,27 +718,32 @@ function _M.check_request(parsed, rules, context)
     local allowed_rule = rules.allowed_tickers
     if type(allowed_rule) == "table" and allowed_rule.enabled == true
        and type(allowed_rule.params) == "table"
-       and type(allowed_rule.params.tickers) == "table"
-       and tool_matches_rule(allowed_rule, tool_name) then
-        if has_invalid_ticker_type(args) then
-            return true,
-                "Invalid ticker type. " ..
-                "Ticker fields must be strings."
-        end
-        local ticker = normalize_ticker(args)
-        if ticker ~= "" then
-            local found = false
-            for _, allowed_sym in ipairs(allowed_rule.params.tickers) do
-                local allowed_symbol = normalize_identifier(allowed_sym)
-                if allowed_symbol ~= nil and ticker == allowed_symbol:upper() then
-                    found = true
-                    break
-                end
-            end
-            if not found then
+       and type(allowed_rule.params.tickers) == "table" then
+        local allowed_has_scope = type(allowed_rule.apply_to_tools) == "table"
+        local allowed_tool_match = tool_matches_rule(allowed_rule, tool_name)
+        -- Fail closed for ticker restrictions: if tool scoping is present but the
+        -- incoming tool is unlisted/unknown, still enforce the ticker rule.
+        if allowed_tool_match or allowed_has_scope then
+            if has_invalid_ticker_type(args) then
                 return true,
-                    "Ticker '" .. ticker ..
-                    "' is not in the allowed symbol list."
+                    "Invalid ticker type. " ..
+                    "Ticker fields must be strings."
+            end
+            local ticker = normalize_ticker(args)
+            if ticker ~= "" then
+                local found = false
+                for _, allowed_sym in ipairs(allowed_rule.params.tickers) do
+                    local allowed_symbol = normalize_identifier(allowed_sym)
+                    if allowed_symbol ~= nil and ticker == allowed_symbol:upper() then
+                        found = true
+                        break
+                    end
+                end
+                if not found then
+                    return true,
+                        "Ticker '" .. ticker ..
+                        "' is not in the allowed symbol list."
+                end
             end
         end
     end
@@ -748,22 +753,27 @@ function _M.check_request(parsed, rules, context)
     -- Blocks requests whose ticker field matches the restricted list.
     -- ----------------------------------------------------------------
     local ticker_rule = rules.blocked_tickers
-    if type(ticker_rule) == "table" and ticker_rule.enabled == true
-       and tool_matches_rule(ticker_rule, tool_name) then
-        if has_invalid_ticker_type(args) then
-            return true,
-                "Invalid ticker type. " ..
-                "Ticker fields must be strings."
-        end
-        local ticker = normalize_ticker(args)
-        if type(ticker_rule.params) == "table"
-           and type(ticker_rule.params.tickers) == "table" then
-            for _, blocked_sym in ipairs(ticker_rule.params.tickers) do
-                local blocked_symbol = normalize_identifier(blocked_sym)
-                if blocked_symbol ~= nil and ticker == blocked_symbol:upper() then
-                    return true,
-                        "Ticker '" .. ticker ..
-                        "' is on the restricted list."
+    if type(ticker_rule) == "table" and ticker_rule.enabled == true then
+        local blocked_has_scope = type(ticker_rule.apply_to_tools) == "table"
+        local blocked_tool_match = tool_matches_rule(ticker_rule, tool_name)
+        -- Fail closed for ticker restrictions: if tool scoping is present but the
+        -- incoming tool is unlisted/unknown, still enforce the ticker rule.
+        if blocked_tool_match or blocked_has_scope then
+            if has_invalid_ticker_type(args) then
+                return true,
+                    "Invalid ticker type. " ..
+                    "Ticker fields must be strings."
+            end
+            local ticker = normalize_ticker(args)
+            if type(ticker_rule.params) == "table"
+               and type(ticker_rule.params.tickers) == "table" then
+                for _, blocked_sym in ipairs(ticker_rule.params.tickers) do
+                    local blocked_symbol = normalize_identifier(blocked_sym)
+                    if blocked_symbol ~= nil and ticker == blocked_symbol:upper() then
+                        return true,
+                            "Ticker '" .. ticker ..
+                            "' is on the restricted list."
+                    end
                 end
             end
         end
