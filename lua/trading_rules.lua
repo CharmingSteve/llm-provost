@@ -529,7 +529,7 @@ function _M.check_request(parsed, rules, context)
     -- ----------------------------------------------------------------
     local size_rule = rules.max_trade_size
     if type(size_rule) == "table" and size_rule.enabled == true
-       and tool_matches_rule(size_rule, tool_name) then
+       and (tool_matches_rule(size_rule, tool_name) or infer_asset_class(tool_name, args) ~= nil) then
         local limit = DEFAULT_TRADE_SIZE_LIMIT
         if type(size_rule.params) == "table"
            and type(size_rule.params.limit) == "number" then
