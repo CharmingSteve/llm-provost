@@ -768,7 +768,8 @@ function _M.check_request(parsed, rules, context)
     -- ----------------------------------------------------------------
     local ticker_rule = rules.blocked_tickers
     if type(ticker_rule) == "table" and ticker_rule.enabled == true then
-        local blocked_has_scope = type(ticker_rule.apply_to_tools) == "table"
+        local blocked_has_scope = type(ticker_rule.params) == "table"
+            and type(ticker_rule.params.apply_to_tools) == "table"
         local blocked_tool_match = tool_matches_rule(ticker_rule, tool_name)
         -- Fail closed for ticker restrictions: if tool scoping is present but the
         -- incoming tool is unlisted/unknown, still enforce the ticker rule.
