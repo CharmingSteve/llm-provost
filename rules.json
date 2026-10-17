@@ -104,6 +104,7 @@
         "enabled": true,
         "description": "FHIR writes (create) allowed for clinical documentation resource types — the working set a physician needs. Identity/administrative records and deletions stay blocked.",
         "params": {
+          "apply_to_tools": ["create"],
           "types": [
             "Condition",
             "MedicationRequest",

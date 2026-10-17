@@ -238,6 +238,21 @@ Rules may declare `params.apply_to_tools`, a list of MCP tool names the rule gov
 Migration: add `apply_to_tools` to each rule in `rules.json` listing the tools it
 should govern, so a renamed or newly added tool is not silently covered or missed.
 
+CI requires every per-server policy (including disabled policies) to declare a
+non-empty `params.apply_to_tools`. Tool allow/blocklists already declare their
+scope through `params.tools` (an empty list is permitted only when disabled).
+`forbidden_endpoints` instead declares REST method/path selectors, not MCP tools.
+The existing top-level generic examples and non-tool policies are exempt; new
+tool policies must live under `mcp_servers`.
+
+`tests/test_rule_tool_scopes.py` checks this configuration contract and includes
+regressions for missing scopes and renamed/withdrawn tools. The Compose CI job
+also initializes each configured upstream MCP server and checks every referenced
+tool against its complete, paginated `tools/list`, without invoking tools or
+relying on a static inventory. Missing tools fail CI, so server upgrades that
+rename or remove a governed tool require a policy update. Runtime defaults for
+older configurations remain unchanged.
+
 ---
 
 ## Complete Example

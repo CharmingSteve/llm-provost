@@ -106,7 +106,7 @@ jobs:
       - name: Run Python audit contract
         run: |
           set -euo pipefail
-          python3 -m pytest tests/test_audit_logs.py
+          python3 -m pytest tests/test_audit_logs.py tests/test_rule_tool_scopes.py
 
   # ── Shell unit tests ───────────────────────────────────────────────────────
   test-shell:
@@ -263,6 +263,8 @@ jobs:
           [ "$(docker inspect -f '{{.State.Health.Status}}' fluent-bit)" = "healthy" ]
       - name: Test FHIR MCP routing, read-only governance and both audit boundaries
         run: docker exec -i llm-provost python3 - < tests/fhir_integration.py
+      - name: Check rule scopes against upstream MCP tool inventories
+        run: docker exec -i llm-provost python3 - --live < tests/test_rule_tool_scopes.py
       - name: Optional public HAPI FHIR read test
         if: vars.FHIR_LIVE_TESTS == 'true'
         env:
