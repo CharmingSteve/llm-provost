@@ -345,7 +345,8 @@ jobs:
       - name: Trivy image scan (llm-provost)
         run: |
           set +e
-          trivy image --exit-code 1 --severity CRITICAL,HIGH "${OPENRESTY_IMAGE}" > /tmp/trivy-openresty.txt 2>&1
+          # Only findings with a fixed version can be acted on by rebuilding the base image.
+          trivy image --exit-code 1 --ignore-unfixed --severity CRITICAL,HIGH "${OPENRESTY_IMAGE}" > /tmp/trivy-openresty.txt 2>&1
           trivy_openresty_status=$?
           cat /tmp/trivy-openresty.txt
           echo "TRIVY_OPENRESTY_STATUS=${trivy_openresty_status}" >> "$GITHUB_ENV"
@@ -396,7 +397,7 @@ jobs:
           fi
           if [ "${TRIVY_OPENRESTY_STATUS:-0}" -ne 0 ]; then
             failed=1
-            echo "::error title=Trivy scan failed::Third-party image ${OPENRESTY_IMAGE} has HIGH/CRITICAL CVEs: ${TRIVY_OPENRESTY_CVES:-unavailable}"
+            echo "::error title=Trivy scan failed::Third-party image ${OPENRESTY_IMAGE} has fixable HIGH/CRITICAL CVEs: ${TRIVY_OPENRESTY_CVES:-unavailable}"
             if [ -f /tmp/trivy-openresty.json ]; then
               jq -r "$JQ_CVE" /tmp/trivy-openresty.json 2>/dev/null || true
             fi
