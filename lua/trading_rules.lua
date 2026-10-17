@@ -528,8 +528,22 @@ function _M.check_request(parsed, rules, context)
     -- Blocks requests where qty/quantity exceeds the configured limit.
     -- ----------------------------------------------------------------
     local size_rule = rules.max_trade_size
-    if type(size_rule) == "table" and size_rule.enabled == true
-       and (tool_matches_rule(size_rule, tool_name) or infer_asset_class(tool_name, args) ~= nil) then
+    local normalized_tool_name = ""
+    if type(tool_name) == "string" then
+        normalized_tool_name = string.lower(tool_name)
+    end
+    local inferred_class_for_size = infer_asset_class(tool_name, args)
+    local is_order_like_tool = (normalized_tool_name ~= "")
+        and string.find(normalized_tool_name, "place_", 1, true) ~= nil
+        and string.find(normalized_tool_name, "_order", 1, true) ~= nil
+    local applies_max_trade_size = type(size_rule) == "table"
+        and size_rule.enabled == true
+        and (
+            tool_matches_rule(size_rule, tool_name)
+            or inferred_class_for_size ~= nil
+            or is_order_like_tool
+        )
+    if applies_max_trade_size then
         local limit = DEFAULT_TRADE_SIZE_LIMIT
         if type(size_rule.params) == "table"
            and type(size_rule.params.limit) == "number" then
