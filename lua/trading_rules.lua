@@ -662,34 +662,49 @@ function _M.check_request(parsed, rules, context)
     -- for a symbol that already has an active cooldown entry is blocked.
     -- ----------------------------------------------------------------
     local cooldown_rule = rules.symbol_order_cooldown
-    if type(cooldown_rule) == "table" and cooldown_rule.enabled == true
-       and tool_matches_rule(cooldown_rule, tool_name) then
-        local window_seconds = 300
-        if type(cooldown_rule.params) == "table" then
-            window_seconds = tonumber(cooldown_rule.params.window_seconds) or window_seconds
+    if type(cooldown_rule) == "table" and cooldown_rule.enabled == true then
+        local cooldown_tool_matches = tool_matches_rule(cooldown_rule, tool_name)
+        local has_tool_scope = false
+        if type(cooldown_rule.params) == "table"
+           and type(cooldown_rule.params.apply_to_tools) == "table"
+           and #cooldown_rule.params.apply_to_tools > 0 then
+            has_tool_scope = true
         end
 
-        if window_seconds > 0 then
-            local ticker = normalize_ticker(args)
-            if ticker ~= "" then
-                local user    = type(context) == "table" and context.user    or nil
-                local machine = type(context) == "table" and context.machine or nil
-                local store   = type(context) == "table" and context.store   or nil
+        if has_tool_scope and not cooldown_tool_matches then
+            return true,
+                "Tool Not Allowed For Cooldown Scope. " ..
+                "Blocked because symbol_order_cooldown is scoped to specific tools and this tool is unlisted."
+        end
 
-                if type(store) == "table"
-                   and type(user) == "string" and user ~= ""
-                   and type(machine) == "string" and machine ~= "" then
-                    local cooldown_key = "symbol_cooldown:" .. user .. ":" .. machine .. ":" .. ticker
-                    local add_ok, add_err = store:add(cooldown_key, 1, window_seconds)
-                    if not add_ok and add_err == "exists" then
-                        return true,
-                            "Symbol Cooldown Active. " ..
-                            "Symbol '" .. ticker .. "' was already ordered within the active " ..
-                            window_seconds .. "s window. Wait before reordering."
-                    elseif not add_ok then
-                        return true,
-                            "Risk State Unavailable. " ..
-                            "Blocked to avoid untracked symbol cooldown."
+        if cooldown_tool_matches or not has_tool_scope then
+            local window_seconds = 300
+            if type(cooldown_rule.params) == "table" then
+                window_seconds = tonumber(cooldown_rule.params.window_seconds) or window_seconds
+            end
+
+            if window_seconds > 0 then
+                local ticker = normalize_ticker(args)
+                if ticker ~= "" then
+                    local user    = type(context) == "table" and context.user    or nil
+                    local machine = type(context) == "table" and context.machine or nil
+                    local store   = type(context) == "table" and context.store   or nil
+
+                    if type(store) == "table"
+                       and type(user) == "string" and user ~= ""
+                       and type(machine) == "string" and machine ~= "" then
+                        local cooldown_key = "symbol_cooldown:" .. user .. ":" .. machine .. ":" .. ticker
+                        local add_ok, add_err = store:add(cooldown_key, 1, window_seconds)
+                        if not add_ok and add_err == "exists" then
+                            return true,
+                                "Symbol Cooldown Active. " ..
+                                "Symbol '" .. ticker .. "' was already ordered within the active " ..
+                                window_seconds .. "s window. Wait before reordering."
+                        elseif not add_ok then
+                            return true,
+                                "Risk State Unavailable. " ..
+                                "Blocked to avoid untracked symbol cooldown."
+                        end
                     end
                 end
             end
