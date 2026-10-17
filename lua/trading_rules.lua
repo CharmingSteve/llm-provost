@@ -279,7 +279,7 @@ local function tool_matches_rule(rule, tool_name)
         return true
     end
     if tool_name == nil then
-        return false
+        return true
     end
     for _, entry in ipairs(list) do
         if normalize_identifier(entry) == tool_name then
