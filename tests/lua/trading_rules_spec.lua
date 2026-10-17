@@ -947,3 +947,29 @@ end)
         end)
 
     end)
+
+describe("trading_rules: apply_to_tools scoping", function()
+    local rules = {
+        max_trade_size = { enabled = true, params = {
+            limit = 100, apply_to_tools = { "place_stock_order" } } }
+    }
+
+    it("applies the rule to a listed tool", function()
+        local blocked = engine.check_request(
+            make_parsed({ quantity = 101 }, "place_stock_order"), rules)
+        assert.is_true(blocked)
+    end)
+
+    it("skips the rule for an unlisted tool", function()
+        local blocked = engine.check_request(
+            make_parsed({ quantity = 101 }, "other_tool"), rules)
+        assert.is_false(blocked)
+    end)
+
+    it("applies to all tools when apply_to_tools is absent", function()
+        local blocked = engine.check_request(
+            make_parsed({ quantity = 101 }, "other_tool"),
+            { max_trade_size = { enabled = true, params = { limit = 100 } } })
+        assert.is_true(blocked)
+    end)
+end)

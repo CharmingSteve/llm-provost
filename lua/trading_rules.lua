@@ -270,6 +270,25 @@ local function normalize_identifier(value)
     return cleaned
 end
 
+-- Returns true when the rule applies to tool_name. A missing or empty
+-- params.apply_to_tools list means the rule applies to all tools.
+local function tool_matches_rule(rule, tool_name)
+    local list = type(rule) == "table" and type(rule.params) == "table"
+        and rule.params.apply_to_tools or nil
+    if type(list) ~= "table" or #list == 0 then
+        return true
+    end
+    if tool_name == nil then
+        return false
+    end
+    for _, entry in ipairs(list) do
+        if normalize_identifier(entry) == tool_name then
+            return true
+        end
+    end
+    return false
+end
+
 local function get_tool_name(parsed)
     if type(parsed) ~= "table" then
         return nil
@@ -493,7 +512,8 @@ function _M.check_request(parsed, rules, context)
     if type(allowed_classes_rule) == "table"
        and allowed_classes_rule.enabled == true
        and type(allowed_classes_rule.params) == "table"
-       and type(allowed_classes_rule.params.classes) == "table" then
+       and type(allowed_classes_rule.params.classes) == "table"
+       and tool_matches_rule(allowed_classes_rule, tool_name) then
         local inferred_class = infer_asset_class(tool_name, args)
         if inferred_class ~= nil
            and not is_allowed_asset_class(allowed_classes_rule.params.classes, inferred_class) then
@@ -508,7 +528,8 @@ function _M.check_request(parsed, rules, context)
     -- Blocks requests where qty/quantity exceeds the configured limit.
     -- ----------------------------------------------------------------
     local size_rule = rules.max_trade_size
-    if type(size_rule) == "table" and size_rule.enabled == true then
+    if type(size_rule) == "table" and size_rule.enabled == true
+       and tool_matches_rule(size_rule, tool_name) then
         local limit = DEFAULT_TRADE_SIZE_LIMIT
         if type(size_rule.params) == "table"
            and type(size_rule.params.limit) == "number" then
@@ -545,7 +566,8 @@ function _M.check_request(parsed, rules, context)
     -- Rule: max_trade_notional
     -- ----------------------------------------------------------------
     local notional_rule = rules.max_trade_notional
-    if type(notional_rule) == "table" and notional_rule.enabled == true then
+    if type(notional_rule) == "table" and notional_rule.enabled == true
+       and tool_matches_rule(notional_rule, tool_name) then
         local limit_value = nil
         if type(notional_rule.params) == "table" then
             limit_value = tonumber(notional_rule.params.limit)
@@ -572,7 +594,8 @@ function _M.check_request(parsed, rules, context)
     -- Rule: cumulative_trade_notional
     -- ----------------------------------------------------------------
     local cumulative_rule = rules.cumulative_trade_notional
-    if type(cumulative_rule) == "table" and cumulative_rule.enabled == true then
+    if type(cumulative_rule) == "table" and cumulative_rule.enabled == true
+       and tool_matches_rule(cumulative_rule, tool_name) then
         local limit_value = nil
         local window_seconds = 300
         if type(cumulative_rule.params) == "table" then
@@ -619,7 +642,8 @@ function _M.check_request(parsed, rules, context)
     -- for a symbol that already has an active cooldown entry is blocked.
     -- ----------------------------------------------------------------
     local cooldown_rule = rules.symbol_order_cooldown
-    if type(cooldown_rule) == "table" and cooldown_rule.enabled == true then
+    if type(cooldown_rule) == "table" and cooldown_rule.enabled == true
+       and tool_matches_rule(cooldown_rule, tool_name) then
         local window_seconds = 300
         if type(cooldown_rule.params) == "table" then
             window_seconds = tonumber(cooldown_rule.params.window_seconds) or window_seconds
@@ -659,7 +683,7 @@ function _M.check_request(parsed, rules, context)
     local restricted_tool_rule = rules.restricted_ticker_tool_rules
     if type(restricted_tool_rule) == "table" and restricted_tool_rule.enabled == true
        and type(restricted_tool_rule.params) == "table"
-       and type(restricted_tool_rule.params.tools) == "table"
+       and type(restricted_tool_rule.params.apply_to_tools or restricted_tool_rule.params.tools) == "table"
        and type(restricted_tool_rule.params.tickers) == "table"
        and tool_name ~= nil then
         if has_invalid_ticker_type(args) then
@@ -669,7 +693,7 @@ function _M.check_request(parsed, rules, context)
         end
         local ticker = normalize_ticker(args)
         if ticker ~= "" then
-            for _, blocked_tool in ipairs(restricted_tool_rule.params.tools) do
+            for _, blocked_tool in ipairs(restricted_tool_rule.params.apply_to_tools or restricted_tool_rule.params.tools) do
                 local blocked_tool_name = normalize_identifier(blocked_tool)
                 if blocked_tool_name ~= nil and tool_name == blocked_tool_name then
                     for _, blocked_sym in ipairs(restricted_tool_rule.params.tickers) do
@@ -694,7 +718,8 @@ function _M.check_request(parsed, rules, context)
     local allowed_rule = rules.allowed_tickers
     if type(allowed_rule) == "table" and allowed_rule.enabled == true
        and type(allowed_rule.params) == "table"
-       and type(allowed_rule.params.tickers) == "table" then
+       and type(allowed_rule.params.tickers) == "table"
+       and tool_matches_rule(allowed_rule, tool_name) then
         if has_invalid_ticker_type(args) then
             return true,
                 "Invalid ticker type. " ..
@@ -723,7 +748,8 @@ function _M.check_request(parsed, rules, context)
     -- Blocks requests whose ticker field matches the restricted list.
     -- ----------------------------------------------------------------
     local ticker_rule = rules.blocked_tickers
-    if type(ticker_rule) == "table" and ticker_rule.enabled == true then
+    if type(ticker_rule) == "table" and ticker_rule.enabled == true
+       and tool_matches_rule(ticker_rule, tool_name) then
         if has_invalid_ticker_type(args) then
             return true,
                 "Invalid ticker type. " ..
@@ -749,7 +775,8 @@ function _M.check_request(parsed, rules, context)
     -- Requires ngx.time(); skipped when ngx is not available.
     -- ----------------------------------------------------------------
     local window_rule = rules.trading_window
-    if type(window_rule) == "table" and window_rule.enabled == true then
+    if type(window_rule) == "table" and window_rule.enabled == true
+       and tool_matches_rule(window_rule, tool_name) then
         if type(ngx) == "table" and type(ngx.time) == "function" then
             local params = window_rule.params or {}
             local start_h = tonumber(params.start_hour) or 0
