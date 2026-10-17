@@ -2,7 +2,7 @@ FROM openresty/openresty:jammy
 
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install --only-upgrade -y libssl3 \
+    && apt-get install --no-install-recommends --only-upgrade -y libssl3 \
     && apt-get install --no-install-recommends -y \
         ca-certificates \
         curl \
