@@ -270,25 +270,6 @@ local function normalize_identifier(value)
     return cleaned
 end
 
--- Returns true when the rule applies to tool_name. A missing or empty
--- params.apply_to_tools list means the rule applies to all tools.
-local function tool_matches_rule(rule, tool_name)
-    local list = type(rule) == "table" and type(rule.params) == "table"
-        and rule.params.apply_to_tools or nil
-    if type(list) ~= "table" or #list == 0 then
-        return true
-    end
-    if tool_name == nil then
-        return true
-    end
-    for _, entry in ipairs(list) do
-        if normalize_identifier(entry) == tool_name then
-            return true
-        end
-    end
-    return false
-end
-
 local function get_tool_name(parsed)
     if type(parsed) ~= "table" then
         return nil
@@ -512,8 +493,7 @@ function _M.check_request(parsed, rules, context)
     if type(allowed_classes_rule) == "table"
        and allowed_classes_rule.enabled == true
        and type(allowed_classes_rule.params) == "table"
-       and type(allowed_classes_rule.params.classes) == "table"
-       and tool_matches_rule(allowed_classes_rule, tool_name) then
+       and type(allowed_classes_rule.params.classes) == "table" then
         local inferred_class = infer_asset_class(tool_name, args)
         if inferred_class ~= nil
            and not is_allowed_asset_class(allowed_classes_rule.params.classes, inferred_class) then
@@ -528,22 +508,7 @@ function _M.check_request(parsed, rules, context)
     -- Blocks requests where qty/quantity exceeds the configured limit.
     -- ----------------------------------------------------------------
     local size_rule = rules.max_trade_size
-    local normalized_tool_name = ""
-    if type(tool_name) == "string" then
-        normalized_tool_name = string.lower(tool_name)
-    end
-    local inferred_class_for_size = infer_asset_class(tool_name, args)
-    local is_order_like_tool = (normalized_tool_name ~= "")
-        and string.find(normalized_tool_name, "place_", 1, true) ~= nil
-        and string.find(normalized_tool_name, "_order", 1, true) ~= nil
-    local applies_max_trade_size = type(size_rule) == "table"
-        and size_rule.enabled == true
-        and (
-            tool_matches_rule(size_rule, tool_name)
-            or inferred_class_for_size ~= nil
-            or is_order_like_tool
-        )
-    if applies_max_trade_size then
+    if type(size_rule) == "table" and size_rule.enabled == true then
         local limit = DEFAULT_TRADE_SIZE_LIMIT
         if type(size_rule.params) == "table"
            and type(size_rule.params.limit) == "number" then
@@ -580,14 +545,7 @@ function _M.check_request(parsed, rules, context)
     -- Rule: max_trade_notional
     -- ----------------------------------------------------------------
     local notional_rule = rules.max_trade_notional
-    local applies_max_trade_notional = type(notional_rule) == "table"
-        and notional_rule.enabled == true
-        and (
-            tool_matches_rule(notional_rule, tool_name)
-            or inferred_class_for_size ~= nil
-            or is_order_like_tool
-        )
-    if applies_max_trade_notional then
+    if type(notional_rule) == "table" and notional_rule.enabled == true then
         local limit_value = nil
         if type(notional_rule.params) == "table" then
             limit_value = tonumber(notional_rule.params.limit)
@@ -614,14 +572,7 @@ function _M.check_request(parsed, rules, context)
     -- Rule: cumulative_trade_notional
     -- ----------------------------------------------------------------
     local cumulative_rule = rules.cumulative_trade_notional
-    local applies_cumulative_trade_notional = type(cumulative_rule) == "table"
-        and cumulative_rule.enabled == true
-        and (
-            tool_matches_rule(cumulative_rule, tool_name)
-            or inferred_class_for_size ~= nil
-            or is_order_like_tool
-        )
-    if applies_cumulative_trade_notional then
+    if type(cumulative_rule) == "table" and cumulative_rule.enabled == true then
         local limit_value = nil
         local window_seconds = 300
         if type(cumulative_rule.params) == "table" then
@@ -669,48 +620,32 @@ function _M.check_request(parsed, rules, context)
     -- ----------------------------------------------------------------
     local cooldown_rule = rules.symbol_order_cooldown
     if type(cooldown_rule) == "table" and cooldown_rule.enabled == true then
-        local cooldown_tool_matches = tool_matches_rule(cooldown_rule, tool_name)
-        local has_tool_scope = false
-        if type(cooldown_rule.params) == "table"
-           and type(cooldown_rule.params.apply_to_tools) == "table"
-           and #cooldown_rule.params.apply_to_tools > 0 then
-            has_tool_scope = true
+        local window_seconds = 300
+        if type(cooldown_rule.params) == "table" then
+            window_seconds = tonumber(cooldown_rule.params.window_seconds) or window_seconds
         end
 
-        if has_tool_scope and not cooldown_tool_matches then
-            return true,
-                "Tool Not Allowed For Cooldown Scope. " ..
-                "Blocked because symbol_order_cooldown is scoped to specific tools and this tool is unlisted."
-        end
+        if window_seconds > 0 then
+            local ticker = normalize_ticker(args)
+            if ticker ~= "" then
+                local user    = type(context) == "table" and context.user    or nil
+                local machine = type(context) == "table" and context.machine or nil
+                local store   = type(context) == "table" and context.store   or nil
 
-        if cooldown_tool_matches or not has_tool_scope then
-            local window_seconds = 300
-            if type(cooldown_rule.params) == "table" then
-                window_seconds = tonumber(cooldown_rule.params.window_seconds) or window_seconds
-            end
-
-            if window_seconds > 0 then
-                local ticker = normalize_ticker(args)
-                if ticker ~= "" then
-                    local user    = type(context) == "table" and context.user    or nil
-                    local machine = type(context) == "table" and context.machine or nil
-                    local store   = type(context) == "table" and context.store   or nil
-
-                    if type(store) == "table"
-                       and type(user) == "string" and user ~= ""
-                       and type(machine) == "string" and machine ~= "" then
-                        local cooldown_key = "symbol_cooldown:" .. user .. ":" .. machine .. ":" .. ticker
-                        local add_ok, add_err = store:add(cooldown_key, 1, window_seconds)
-                        if not add_ok and add_err == "exists" then
-                            return true,
-                                "Symbol Cooldown Active. " ..
-                                "Symbol '" .. ticker .. "' was already ordered within the active " ..
-                                window_seconds .. "s window. Wait before reordering."
-                        elseif not add_ok then
-                            return true,
-                                "Risk State Unavailable. " ..
-                                "Blocked to avoid untracked symbol cooldown."
-                        end
+                if type(store) == "table"
+                   and type(user) == "string" and user ~= ""
+                   and type(machine) == "string" and machine ~= "" then
+                    local cooldown_key = "symbol_cooldown:" .. user .. ":" .. machine .. ":" .. ticker
+                    local add_ok, add_err = store:add(cooldown_key, 1, window_seconds)
+                    if not add_ok and add_err == "exists" then
+                        return true,
+                            "Symbol Cooldown Active. " ..
+                            "Symbol '" .. ticker .. "' was already ordered within the active " ..
+                            window_seconds .. "s window. Wait before reordering."
+                    elseif not add_ok then
+                        return true,
+                            "Risk State Unavailable. " ..
+                            "Blocked to avoid untracked symbol cooldown."
                     end
                 end
             end
@@ -734,7 +669,9 @@ function _M.check_request(parsed, rules, context)
         end
         local ticker = normalize_ticker(args)
         if ticker ~= "" then
-            for _, blocked_tool in ipairs(restricted_tool_rule.params.apply_to_tools or restricted_tool_rule.params.tools) do
+            for _, blocked_tool in ipairs(
+                restricted_tool_rule.params.apply_to_tools or restricted_tool_rule.params.tools
+            ) do
                 local blocked_tool_name = normalize_identifier(blocked_tool)
                 if blocked_tool_name ~= nil and tool_name == blocked_tool_name then
                     for _, blocked_sym in ipairs(restricted_tool_rule.params.tickers) do
@@ -760,31 +697,25 @@ function _M.check_request(parsed, rules, context)
     if type(allowed_rule) == "table" and allowed_rule.enabled == true
        and type(allowed_rule.params) == "table"
        and type(allowed_rule.params.tickers) == "table" then
-        local allowed_has_scope = type(allowed_rule.params.apply_to_tools) == "table"
-        local allowed_tool_match = tool_matches_rule(allowed_rule, tool_name)
-        -- Fail closed for ticker restrictions: if tool scoping is present but the
-        -- incoming tool is unlisted/unknown, still enforce the ticker rule.
-        if allowed_tool_match or allowed_has_scope then
-            if has_invalid_ticker_type(args) then
-                return true,
-                    "Invalid ticker type. " ..
-                    "Ticker fields must be strings."
+        if has_invalid_ticker_type(args) then
+            return true,
+                "Invalid ticker type. " ..
+                "Ticker fields must be strings."
+        end
+        local ticker = normalize_ticker(args)
+        if ticker ~= "" then
+            local found = false
+            for _, allowed_sym in ipairs(allowed_rule.params.tickers) do
+                local allowed_symbol = normalize_identifier(allowed_sym)
+                if allowed_symbol ~= nil and ticker == allowed_symbol:upper() then
+                    found = true
+                    break
+                end
             end
-            local ticker = normalize_ticker(args)
-            if ticker ~= "" then
-                local found = false
-                for _, allowed_sym in ipairs(allowed_rule.params.tickers) do
-                    local allowed_symbol = normalize_identifier(allowed_sym)
-                    if allowed_symbol ~= nil and ticker == allowed_symbol:upper() then
-                        found = true
-                        break
-                    end
-                end
-                if not found then
-                    return true,
-                        "Ticker '" .. ticker ..
-                        "' is not in the allowed symbol list."
-                end
+            if not found then
+                return true,
+                    "Ticker '" .. ticker ..
+                    "' is not in the allowed symbol list."
             end
         end
     end
@@ -795,27 +726,20 @@ function _M.check_request(parsed, rules, context)
     -- ----------------------------------------------------------------
     local ticker_rule = rules.blocked_tickers
     if type(ticker_rule) == "table" and ticker_rule.enabled == true then
-        local blocked_has_scope = type(ticker_rule.params) == "table"
-            and type(ticker_rule.params.apply_to_tools) == "table"
-        local blocked_tool_match = tool_matches_rule(ticker_rule, tool_name)
-        -- Fail closed for ticker restrictions: if tool scoping is present but the
-        -- incoming tool is unlisted/unknown, still enforce the ticker rule.
-        if blocked_tool_match or blocked_has_scope then
-            if has_invalid_ticker_type(args) then
-                return true,
-                    "Invalid ticker type. " ..
-                    "Ticker fields must be strings."
-            end
-            local ticker = normalize_ticker(args)
-            if type(ticker_rule.params) == "table"
-               and type(ticker_rule.params.tickers) == "table" then
-                for _, blocked_sym in ipairs(ticker_rule.params.tickers) do
-                    local blocked_symbol = normalize_identifier(blocked_sym)
-                    if blocked_symbol ~= nil and ticker == blocked_symbol:upper() then
-                        return true,
-                            "Ticker '" .. ticker ..
-                            "' is on the restricted list."
-                    end
+        if has_invalid_ticker_type(args) then
+            return true,
+                "Invalid ticker type. " ..
+                "Ticker fields must be strings."
+        end
+        local ticker = normalize_ticker(args)
+        if type(ticker_rule.params) == "table"
+           and type(ticker_rule.params.tickers) == "table" then
+            for _, blocked_sym in ipairs(ticker_rule.params.tickers) do
+                local blocked_symbol = normalize_identifier(blocked_sym)
+                if blocked_symbol ~= nil and ticker == blocked_symbol:upper() then
+                    return true,
+                        "Ticker '" .. ticker ..
+                        "' is on the restricted list."
                 end
             end
         end
@@ -828,23 +752,16 @@ function _M.check_request(parsed, rules, context)
     -- ----------------------------------------------------------------
     local window_rule = rules.trading_window
     if type(window_rule) == "table" and window_rule.enabled == true then
-        local window_has_scope = type(window_rule.params) == "table"
-            and type(window_rule.params.apply_to_tools) == "table"
-        local window_tool_match = tool_matches_rule(window_rule, tool_name)
-        -- Fail closed for trading window restrictions: if tool scoping is present
-        -- but the incoming tool is unlisted/unknown, still enforce the rule.
-        if window_tool_match or window_has_scope then
-            if type(ngx) == "table" and type(ngx.time) == "function" then
-                local params = window_rule.params or {}
-                local start_h = tonumber(params.start_hour) or 0
-                local end_h   = tonumber(params.end_hour)   or 23
-                -- Use os.date('!*t') to get the current UTC hour correctly.
-                local hour    = os.date("!*t", ngx.time()).hour
-                if hour < start_h or hour >= end_h then
-                    return true,
-                        "Trading outside allowed window " ..
-                        "(" .. start_h .. ":00-" .. end_h .. ":00 UTC)."
-                end
+        if type(ngx) == "table" and type(ngx.time) == "function" then
+            local params = window_rule.params or {}
+            local start_h = tonumber(params.start_hour) or 0
+            local end_h   = tonumber(params.end_hour)   or 23
+            -- Use os.date('!*t') to get the current UTC hour correctly.
+            local hour    = os.date("!*t", ngx.time()).hour
+            if hour < start_h or hour >= end_h then
+                return true,
+                    "Trading outside allowed window " ..
+                    "(" .. start_h .. ":00-" .. end_h .. ":00 UTC)."
             end
         end
     end

@@ -960,10 +960,98 @@ describe("trading_rules: apply_to_tools scoping", function()
         assert.is_true(blocked)
     end)
 
-    it("skips the rule for an unlisted tool", function()
+    it("preserves argument-based enforcement for an unlisted tool", function()
         local blocked = engine.check_request(
             make_parsed({ quantity = 101 }, "other_tool"), rules)
-        assert.is_false(blocked)
+        assert.is_true(blocked)
+    end)
+
+    describe("trading_rules: scopes supplement original policy coverage", function()
+        local original_ngx
+
+        before_each(function()
+            original_ngx = _G.ngx
+            _G.ngx = { time = function() return 0 end }
+        end)
+
+        after_each(function()
+            _G.ngx = original_ngx
+        end)
+
+        local cases = {
+            { "allowed_asset_classes", { classes = { "us_equity" } },
+              { asset_class = "us_option" }, "Asset class" },
+            { "max_trade_size", { limit = 100 }, { quantity = 101 }, "Risk Limit Exceeded" },
+            { "max_trade_notional", { limit = 100 }, { qty = 11, limit_price = 10 },
+              "Risk Limit Exceeded" },
+            { "cumulative_trade_notional", { limit = 100 },
+              { symbol = "AAPL", qty = 6, limit_price = 10 }, "Cumulative Risk Limit Exceeded" },
+            { "symbol_order_cooldown", { window_seconds = 300 },
+              { symbol = "AAPL" }, "Symbol Cooldown Active" },
+            { "allowed_tickers", { tickers = { "MSFT" } }, { symbol = "AAPL" },
+              "not in the allowed symbol list" },
+            { "blocked_tickers", { tickers = { "AAPL" } }, { symbol = "AAPL" },
+              "on the restricted list" },
+            { "trading_window", { start_hour = 9, end_hour = 17 }, {}, "Trading outside" },
+        }
+
+        for _, case in ipairs(cases) do
+            it("preserves " .. case[1] .. " for listed, renamed and unresolved tools", function()
+                for _, tool in ipairs({
+                    "place_stock_order", "PLACE_STOCK_ORDER", "place_etf_order",
+                    "exercise_options_position", "submit_trade_v2", false,
+                }) do
+                    local values = {}
+                    local context = {
+                        user = "user", machine = "machine",
+                        store = {
+                            add = function(_, key, value)
+                                if values[key] ~= nil then return nil, "exists" end
+                                values[key] = value
+                                return true
+                            end,
+                            get = function(_, key) return values[key] end,
+                            set = function(_, key, value) values[key] = value; return true end,
+                        },
+                    }
+                    local params = {}
+                    for key, value in pairs(case[2]) do params[key] = value end
+                    params.apply_to_tools = { "place_stock_order" }
+                    local scoped = { [case[1]] = { enabled = true, params = params } }
+                    local parsed = make_parsed(case[3], tool)
+                    if case[1] == "cumulative_trade_notional" or case[1] == "symbol_order_cooldown" then
+                        assert.is_false(engine.check_request(parsed, scoped, context))
+                    end
+                    local blocked, reason = engine.check_request(parsed, scoped, context)
+                    assert.is_true(blocked)
+                    assert.truthy(reason:find(case[4], 1, true))
+                end
+            end)
+        end
+
+        it("still infers disallowed classes for unlisted tools without an explicit asset_class", function()
+            for _, tool in ipairs({ "exercise_options_position", "PLACE_OPTION_ORDER" }) do
+                local blocked = engine.check_request(make_parsed({}, tool), {
+                    allowed_asset_classes = { enabled = true, params = {
+                        classes = { "us_equity" }, apply_to_tools = { "place_stock_order" },
+                    } },
+                })
+                assert.is_true(blocked)
+            end
+        end)
+
+        it("allows compliant requests and unrelated read tools despite explicit scopes", function()
+            assert.is_false(engine.check_request(make_parsed({}, "get_account_info"), {
+                symbol_order_cooldown = { enabled = true, params = {
+                    window_seconds = 300, apply_to_tools = { "place_stock_order" },
+                } },
+            }))
+            assert.is_false(engine.check_request(make_parsed({ quantity = 1 }, "submit_trade_v2"), {
+                max_trade_size = { enabled = true, params = {
+                    limit = 100, apply_to_tools = { "place_stock_order" },
+                } },
+            }))
+        end)
     end)
 
     it("applies to all tools when apply_to_tools is absent", function()

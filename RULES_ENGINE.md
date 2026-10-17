@@ -225,18 +225,31 @@ None of this lookup exists today. Entries added to `group_overrides` are ignored
 
 ## Scoping Rules with `apply_to_tools`
 
-Rules may declare `params.apply_to_tools`, a list of MCP tool names the rule governs.
+Rules declare `params.apply_to_tools` to identify the MCP tools they govern.
+These declarations supplement existing enforcement; they must not narrow a
+previously tool-agnostic policy:
 
-- Missing or empty: the rule applies to all tools (backward compatible).
-- Non-empty: the rule applies only to the listed tools; other tools skip it.
+- Trading size, notional, cumulative exposure, cooldown, ticker and trading-window
+  checks still evaluate request arguments regardless of the tool's name.
+- Asset-class restrictions still use explicit `asset_class` arguments or the
+  existing tool-name inference, including tools outside the declared list.
+- FHIR `create` requests for `MedicationRequest` still receive controlled-substance
+  checks. Neither `apply_to_tools` nor `apply_to_resource_types` can disable that
+  existing protection.
+- Global allow/blocklists, rate limits, token caps and time rules are unchanged.
 
-`controlled_substance_rules` additionally accepts `params.apply_to_resource_types`
-(for example `["MedicationRequest"]`); both the tool name and resource type must match.
 `restricted_ticker_tool_rules` previously used `params.tools`; it now uses
-`apply_to_tools` (the legacy `tools` key is still read as a fallback).
+`apply_to_tools` (the legacy `tools` key is still read as a fallback). This rule
+was already tool-specific and retains its explicit tool matching.
 
-Migration: add `apply_to_tools` to each rule in `rules.json` listing the tools it
-should govern, so a renamed or newly added tool is not silently covered or missed.
+Migration: add `apply_to_tools` to each rule in `rules.json` listing the intended
+tools. Unlisted or renamed tools do not escape the argument-based checks above.
+
+The proxy's enforcement is deterministic: it does not call an LLM to classify
+tool descriptions or assign policies. This was also true before tool declarations
+were introduced. An external LLM may choose which tool to invoke, but the proxy
+independently checks the resulting request. Global `llm_rules` provide deterministic
+PII filtering and token caps for chat requests, not semantic tool classification.
 
 CI requires every per-server policy (including disabled policies) to declare a
 non-empty `params.apply_to_tools`. Tool allow/blocklists already declare their

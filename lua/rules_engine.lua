@@ -390,26 +390,9 @@ local function format_days(days)
     return string.format("%.1f", days)
 end
 
--- Returns true when the rule applies to tool_name. A missing or empty
--- params.apply_to_tools list means the rule applies to all tools.
-local function tool_matches_rule(params, tool_name)
-    local list = type(params) == "table" and params.apply_to_tools or nil
-    if type(list) ~= "table" or #list == 0 then
-        return true
-    end
-    return contains(list, tool_name)
-end
-
-local function check_controlled_substance(server_rules, payload, serialized, context, tool_name, resource_type)
+local function check_controlled_substance(server_rules, payload, serialized, context)
     local params = enabled_params(server_rules.controlled_substance_rules)
     if not params or type(params.substances) ~= "table" then
-        return true
-    end
-    if not tool_matches_rule(params, tool_name) then
-        return true
-    end
-    local types = params.apply_to_resource_types
-    if type(types) == "table" and #types > 0 and not contains(types, resource_type) then
         return true
     end
     if type(serialized) ~= "string" then
@@ -478,8 +461,7 @@ local function check_write_rules(rules, request, context)
     end
 
     if resource_type == "MedicationRequest" then
-        return check_controlled_substance(server_rules, payload, serialized, context,
-            request.tool_name, resource_type)
+        return check_controlled_substance(server_rules, payload, serialized, context)
     end
 
     return true
