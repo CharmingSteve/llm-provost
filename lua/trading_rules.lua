@@ -614,8 +614,14 @@ function _M.check_request(parsed, rules, context)
     -- Rule: cumulative_trade_notional
     -- ----------------------------------------------------------------
     local cumulative_rule = rules.cumulative_trade_notional
-    if type(cumulative_rule) == "table" and cumulative_rule.enabled == true
-       and tool_matches_rule(cumulative_rule, tool_name) then
+    local applies_cumulative_trade_notional = type(cumulative_rule) == "table"
+        and cumulative_rule.enabled == true
+        and (
+            tool_matches_rule(cumulative_rule, tool_name)
+            or inferred_class_for_size ~= nil
+            or is_order_like_tool
+        )
+    if applies_cumulative_trade_notional then
         local limit_value = nil
         local window_seconds = 300
         if type(cumulative_rule.params) == "table" then
