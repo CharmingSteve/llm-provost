@@ -580,8 +580,14 @@ function _M.check_request(parsed, rules, context)
     -- Rule: max_trade_notional
     -- ----------------------------------------------------------------
     local notional_rule = rules.max_trade_notional
-    if type(notional_rule) == "table" and notional_rule.enabled == true
-       and tool_matches_rule(notional_rule, tool_name) then
+    local applies_max_trade_notional = type(notional_rule) == "table"
+        and notional_rule.enabled == true
+        and (
+            tool_matches_rule(notional_rule, tool_name)
+            or inferred_class_for_size ~= nil
+            or is_order_like_tool
+        )
+    if applies_max_trade_notional then
         local limit_value = nil
         if type(notional_rule.params) == "table" then
             limit_value = tonumber(notional_rule.params.limit)
