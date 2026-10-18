@@ -104,6 +104,7 @@
         "enabled": true,
         "description": "FHIR writes (create) allowed for clinical documentation resource types — the working set a physician needs. Identity/administrative records and deletions stay blocked.",
         "params": {
+          "apply_to_tools": ["create"],
           "types": [
             "Condition",
             "MedicationRequest",
@@ -125,6 +126,8 @@
         "enabled": true,
         "description": "Controlled substances are prescribable but capped at a 3-day supply. Default cap applies to everyone until per-group overrides are populated from OIDC groups (future). group_overrides is the extension point: keys will be OIDC group names (e.g. nurses, er_doctors, gps, pain_specialists), values = max days supply (0 = blocked). Not implemented yet; keep empty.",
         "params": {
+          "apply_to_tools": ["create"],
+          "apply_to_resource_types": ["MedicationRequest"],
           "substances": ["oxycontin", "oxycodone", "fentanyl", "morphine", "hydrocodone", "methadone", "adderall", "percocet", "dilaudid", "hydromorphone", "codeine", "meperidine"],
           "default_max_days_supply": 3,
           "group_overrides": {}
@@ -143,6 +146,7 @@
         "enabled": true,
         "description": "Block trades whose share quantity exceeds the configured limit (Agent Provost max_trade_size).",
         "params": {
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "limit": 100
         }
       },
@@ -150,6 +154,7 @@
         "enabled": true,
         "description": "Block trades whose dollar notional value exceeds the configured limit (Agent Provost max_trade_notional).",
         "params": {
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "limit": 50000
         }
       },
@@ -157,6 +162,7 @@
         "enabled": true,
         "description": "Block cumulative dollar exposure across multiple orders within a short rolling window.",
         "params": {
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "limit": 50000,
           "window_seconds": 300
         }
@@ -165,6 +171,7 @@
         "enabled": true,
         "description": "Block repeat orders for the same symbol within a rolling time window.",
         "params": {
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "window_seconds": 300
         }
       },
@@ -172,6 +179,7 @@
         "enabled": true,
         "description": "Block trades on tickers in the restricted symbol list (Agent Provost blocked_tickers).",
         "params": {
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "tickers": ["GME", "AMC", "BBBY"]
         }
       },
@@ -179,6 +187,7 @@
         "enabled": false,
         "description": "Draconian Mode: block ALL trades except symbols in this allowlist (Agent Provost allowed_tickers).",
         "params": {
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "tickers": ["SPY", "QQQ"]
         }
       },
@@ -186,6 +195,7 @@
         "enabled": true,
         "description": "Allow trading only for listed asset classes.",
         "params": {
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "classes": ["us_equity", "crypto", "us_option"]
         }
       },
@@ -193,7 +203,7 @@
         "enabled": true,
         "description": "Block restricted ticker symbols when used by specific trade tools, regardless of argument field naming.",
         "params": {
-          "tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "tickers": ["GME", "AMC", "BBBY"]
         }
       },
@@ -231,6 +241,7 @@
         "enabled": true,
         "description": "Block order replacement requests when replacement notional exceeds policy limit.",
         "params": {
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "limit": 10000
         }
       },
@@ -238,6 +249,7 @@
         "enabled": true,
         "description": "Block replacing limit orders with market orders.",
         "params": {
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "enabled": true
         }
       },
@@ -245,6 +257,7 @@
         "enabled": true,
         "description": "Block close-position requests above configured notional limit.",
         "params": {
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "limit": 10000
         }
       },
@@ -252,6 +265,7 @@
         "enabled": true,
         "description": "Allow close-position requests only for configured symbols.",
         "params": {
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "tickers": ["AAPL", "MSFT", "ETH/USD"]
         }
       },
@@ -259,6 +273,7 @@
         "enabled": false,
         "description": "Restrict automated trading to allowed UTC hours only.",
         "params": {
+          "apply_to_tools": ["place_stock_order", "place_option_order", "place_crypto_order"],
           "start_hour": 13,
           "end_hour": 21
         }

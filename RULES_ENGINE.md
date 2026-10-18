@@ -223,6 +223,51 @@ None of this lookup exists today. Entries added to `group_overrides` are ignored
 
 ---
 
+## Scoping Rules with `apply_to_tools`
+
+Rules declare `params.apply_to_tools` to identify the MCP tools they govern.
+These declarations supplement existing enforcement; they must not narrow a
+previously tool-agnostic policy:
+
+- Trading size, notional, cumulative exposure, cooldown, ticker and trading-window
+  checks still evaluate request arguments regardless of the tool's name.
+- Asset-class restrictions still use explicit `asset_class` arguments or the
+  existing tool-name inference, including tools outside the declared list.
+- FHIR `create` requests for `MedicationRequest` still receive controlled-substance
+  checks. Neither `apply_to_tools` nor `apply_to_resource_types` can disable that
+  existing protection.
+- Global allow/blocklists, rate limits, token caps and time rules are unchanged.
+
+`restricted_ticker_tool_rules` previously used `params.tools`; it now uses
+`apply_to_tools` (the legacy `tools` key is still read as a fallback). This rule
+was already tool-specific and retains its explicit tool matching.
+
+Migration: add `apply_to_tools` to each rule in `rules.json` listing the intended
+tools. Unlisted or renamed tools do not escape the argument-based checks above.
+
+The proxy's enforcement is deterministic: it does not call an LLM to classify
+tool descriptions or assign policies. This was also true before tool declarations
+were introduced. An external LLM may choose which tool to invoke, but the proxy
+independently checks the resulting request. Global `llm_rules` provide deterministic
+PII filtering and token caps for chat requests, not semantic tool classification.
+
+CI requires every per-server policy (including disabled policies) to declare a
+non-empty `params.apply_to_tools`. Tool allow/blocklists already declare their
+scope through `params.tools` (an empty list is permitted only when disabled).
+`forbidden_endpoints` instead declares REST method/path selectors, not MCP tools.
+The existing top-level generic examples and non-tool policies are exempt; new
+tool policies must live under `mcp_servers`.
+
+`tests/test_rule_tool_scopes.py` checks this configuration contract and includes
+regressions for missing scopes and renamed/withdrawn tools. The Compose CI job
+also initializes each configured upstream MCP server and checks every referenced
+tool against its complete, paginated `tools/list`, without invoking tools or
+relying on a static inventory. Missing tools fail CI, so server upgrades that
+rename or remove a governed tool require a policy update. Runtime defaults for
+older configurations remain unchanged.
+
+---
+
 ## Complete Example
 
 The shipped `rules.json` includes all six required top-level fields with a generic governance example.

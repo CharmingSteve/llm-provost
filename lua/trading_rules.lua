@@ -659,7 +659,7 @@ function _M.check_request(parsed, rules, context)
     local restricted_tool_rule = rules.restricted_ticker_tool_rules
     if type(restricted_tool_rule) == "table" and restricted_tool_rule.enabled == true
        and type(restricted_tool_rule.params) == "table"
-       and type(restricted_tool_rule.params.tools) == "table"
+       and type(restricted_tool_rule.params.apply_to_tools or restricted_tool_rule.params.tools) == "table"
        and type(restricted_tool_rule.params.tickers) == "table"
        and tool_name ~= nil then
         if has_invalid_ticker_type(args) then
@@ -669,7 +669,9 @@ function _M.check_request(parsed, rules, context)
         end
         local ticker = normalize_ticker(args)
         if ticker ~= "" then
-            for _, blocked_tool in ipairs(restricted_tool_rule.params.tools) do
+            for _, blocked_tool in ipairs(
+                restricted_tool_rule.params.apply_to_tools or restricted_tool_rule.params.tools
+            ) do
                 local blocked_tool_name = normalize_identifier(blocked_tool)
                 if blocked_tool_name ~= nil and tool_name == blocked_tool_name then
                     for _, blocked_sym in ipairs(restricted_tool_rule.params.tickers) do

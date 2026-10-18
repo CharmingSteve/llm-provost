@@ -133,6 +133,15 @@ describe("FHIR MCP rules", function()
         assert.equals("controlled substance blocked: oxycontin exceeds max supply: 30 days > 3 days", reason)
     end)
 
+    it("does not let scope declarations disable existing MedicationRequest protection", function()
+        local params = rules.mcp_servers.fhir.controlled_substance_rules.params
+        params.apply_to_tools = { "create_v2" }
+        params.apply_to_resource_types = { "Observation" }
+        local allowed, reason = create("MedicationRequest", medication("OxyContin", days(30)))
+        assert.is_false(allowed)
+        assert.truthy(reason:find("exceeds max supply", 1, true))
+    end)
+
     it("computes supply from quantity and dosage (60 pills twice daily = 30 days)", function()
         local allowed, reason = create("MedicationRequest", medication("OxyContin", {
             quantity = { value = 60, unit = "tablet" },
