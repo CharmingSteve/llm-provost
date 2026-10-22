@@ -83,6 +83,10 @@ local function run_policy(options)
             get_method = function()
                 return "POST"
             end,
+            set_header = function(name, value)
+                options.set_headers = options.set_headers or {}
+                options.set_headers[name] = value
+            end,
         },
         shared = {
             rules = {
@@ -345,14 +349,16 @@ describe("four-layer identity extraction", function()
             backend_name = "bedrock",
             routes_json = '{"bedrock":"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"}',
             bedrock_enabled = "true",
+            body = '{"model":"amazon.nova-pro-v1:0","messages":[{"role":"user","content":"hi"}]}',
         }
         local result = run_policy(options)
         assert.equals(1, options.bedrock_calls)
         assert.is_nil(result.exit_status)
         assert.equals(
-            "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1/chat/completions",
+            "https://bedrock-runtime.us-east-1.amazonaws.com/model/amazon.nova-pro-v1%3A0/converse",
             result.var.llm_target_url
         )
+        assert.equals("application/json", options.set_headers.Accept)
     end)
 
     it("returns 404 for an unknown LLM backend", function()

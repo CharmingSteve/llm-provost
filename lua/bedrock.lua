@@ -106,7 +106,7 @@ local function client()
     return aws_client
 end
 
-local function signed_headers(method, host, path, body)
+local function signed_headers(method, host, path, body, query)
     local access_key, secret_key, session_token, err = get_credentials()
     if not access_key then
         return nil, "no AWS credentials resolved: " .. tostring(err)
@@ -117,14 +117,20 @@ local function signed_headers(method, host, path, body)
         secretAccessKey = secret_key,
         sessionToken = session_token,
     })
-    local signed, sign_err = sign_request(aws.config, {
+    local request = {
         method = method,
         host = host,
         port = 443,
         path = path,
+        query = query,
         body = body or "",
         headers = {},
-    })
+    }
+    if path:sub(1, 7) == "/model/" then
+        -- Bedrock verifies native model paths with percent escapes encoded twice.
+        request.canonicalURI = (path:gsub("%%", "%%25"))
+    end
+    local signed, sign_err = sign_request(aws.config, request)
     return signed and signed.headers or nil, sign_err
 end
 
@@ -132,9 +138,9 @@ function _M.runtime_host()
     return "bedrock-runtime." .. region() .. ".amazonaws.com"
 end
 
-function _M.prepare_request(body)
+function _M.prepare_request(body, path)
     local host = _M.runtime_host()
-    local headers, err = signed_headers(ngx.req.get_method(), host, ngx.var.bedrock_path, body)
+    local headers, err = signed_headers(ngx.req.get_method(), host, path or ngx.var.bedrock_path, body)
     if not headers then
         return nil, err
     end
@@ -146,45 +152,172 @@ function _M.prepare_request(body)
     return host
 end
 
-function _M.models()
-    local host = "bedrock." .. region() .. ".amazonaws.com"
-    local headers, err = signed_headers("GET", host, "/foundation-models", "")
-    if not headers then
-        return nil, err
+-- Anything that is not a plain text chat model: speech, video understanding
+-- and rerankers answer Converse with a validation error.
+local NON_CHAT_PATTERNS = { "^twelvelabs%.", "rerank", "sonic" }
+
+local GEO_PREFIX = { us = "us.", eu = "eu.", ap = "apac.", ca = "ca.", jp = "jp.", au = "au." }
+
+local function contains(list, value)
+    for _, item in ipairs(list or {}) do
+        if item == value then
+            return true
+        end
     end
-    local client = http.new()
-    client:set_timeout(30000)
-    local response, request_err = client:request_uri("https://" .. host .. "/foundation-models", {
-        method = "GET",
-        headers = headers,
-        ssl_server_name = host,
-        ssl_verify = true,
-    })
-    if not response then
-        return nil, request_err
+    return false
+end
+
+local function is_chat_model(model)
+    if type(model.modelId) ~= "string" or not contains(model.outputModalities, "TEXT") then
+        return false
     end
-    if response.status == 401 or response.status == 403 then
-        _M.invalidate()
+    if contains(model.outputModalities, "SPEECH") or contains(model.inputModalities, "SPEECH") then
+        return false
     end
-    if response.status < 200 or response.status >= 300 then
-        -- Surface the REAL AWS error so it lands in the logs.
-        return nil, "Bedrock model listing returned status " .. response.status
-            .. " body: " .. string.sub(response.body or "", 1, 500)
+    -- AWS blocks LEGACY models for accounts that have not used them recently.
+    if type(model.modelLifecycle) == "table" and model.modelLifecycle.status == "LEGACY" then
+        return false
     end
-    local payload = cjson.decode(response.body)
-    if type(payload) ~= "table" or type(payload.modelSummaries) ~= "table" then
-        return nil, "invalid Bedrock model listing response"
+    for _, pattern in ipairs(NON_CHAT_PATTERNS) do
+        if model.modelId:find(pattern) then
+            return false
+        end
     end
-    local models = {}
-    for _, model in ipairs(payload.modelSummaries) do
-        for _, modality in ipairs(model.outputModalities or {}) do
-            if modality == "TEXT" then
-                table.insert(models, { id = model.modelId, object = "model", owned_by = "amazon-bedrock" })
-                break
+    return true
+end
+
+-- Picks the id Converse accepts for a model: the plain id when AWS serves it
+-- on demand, otherwise a system inference profile (region geography first,
+-- then global).
+local function invocation_id(model, profile_ids, geo_prefix)
+    if contains(model.inferenceTypesSupported, "ON_DEMAND") then
+        return model.modelId
+    end
+    if not contains(model.inferenceTypesSupported, "INFERENCE_PROFILE") then
+        return nil
+    end
+    local geo, global, other
+    for _, id in ipairs(profile_ids or {}) do
+        if geo_prefix and id:sub(1, #geo_prefix) == geo_prefix then
+            geo = geo or id
+        elseif id:sub(1, 7) == "global." then
+            global = global or id
+        else
+            other = other or id
+        end
+    end
+    return geo or global or other
+end
+
+-- Pure: builds the OpenAI model listing from the two AWS listings.
+function _M.build_catalog(foundation_models, inference_profiles, geo_prefix)
+    local profiles_by_model = {}
+    for _, profile in ipairs(inference_profiles or {}) do
+        if profile.status == "ACTIVE" and type(profile.inferenceProfileId) == "string" then
+            for _, model in ipairs(profile.models or {}) do
+                local base = tostring(model.modelArn or ""):match(":foundation%-model/(.+)$")
+                if base then
+                    profiles_by_model[base] = profiles_by_model[base] or {}
+                    table.insert(profiles_by_model[base], profile.inferenceProfileId)
+                end
             end
         end
     end
+    local models = {}
+    for _, model in ipairs(foundation_models or {}) do
+        if is_chat_model(model) then
+            local ids = profiles_by_model[model.modelId]
+            if ids then
+                table.sort(ids)
+            end
+            local id = invocation_id(model, ids, geo_prefix)
+            if id then
+                table.insert(models, { id = id, object = "model", owned_by = "amazon-bedrock" })
+            end
+        end
+    end
+    table.sort(models, function(a, b) return a.id < b.id end)
     return { object = "list", data = models }
+end
+
+local function list_pages(host, path, field, query)
+    local items, token = {}, nil
+    for _ = 1, 10 do
+        local page_query = query
+        if token then
+            page_query = (query and (query .. "&") or "") .. "nextToken=" .. ngx.escape_uri(token)
+        end
+        local headers, err = signed_headers("GET", host, path, "", page_query)
+        if not headers then
+            return nil, err
+        end
+        local requester = http.new()
+        requester:set_timeout(30000)
+        local response, request_err = requester:request_uri(
+            "https://" .. host .. path .. (page_query and ("?" .. page_query) or ""), {
+                method = "GET",
+                headers = headers,
+                ssl_server_name = host,
+                ssl_verify = true,
+            })
+        if not response then
+            return nil, request_err
+        end
+        if response.status == 401 or response.status == 403 then
+            _M.invalidate()
+        end
+        if response.status < 200 or response.status >= 300 then
+            -- Surface the REAL AWS error so it lands in the logs.
+            return nil, "Bedrock model listing returned status " .. response.status
+                .. " body: " .. string.sub(response.body or "", 1, 500)
+        end
+        local payload = cjson.decode(response.body)
+        if type(payload) ~= "table" or type(payload[field]) ~= "table" then
+            return nil, "invalid Bedrock model listing response"
+        end
+        for _, item in ipairs(payload[field]) do
+            items[#items + 1] = item
+        end
+        token = type(payload.nextToken) == "string" and payload.nextToken ~= "" and payload.nextToken or nil
+        if not token then
+            return items
+        end
+    end
+    return items
+end
+
+local CATALOG_KEY = "catalog:"
+local CATALOG_TTL = 3600
+
+-- The listing is derived from AWS metadata (no per-model probing) and cached
+-- for an hour; it is therefore static between refreshes.
+function _M.models()
+    local region_name = region()
+    local dict = creds_cache()
+    local key = CATALOG_KEY .. region_name
+    local cached = dict and dict:get(key)
+    if cached then
+        local decoded = cjson.decode(cached)
+        if type(decoded) == "table" and type(decoded.data) == "table" then
+            return decoded
+        end
+    end
+
+    local host = "bedrock." .. region_name .. ".amazonaws.com"
+    local foundation, err = list_pages(host, "/foundation-models", "modelSummaries")
+    if not foundation then
+        return nil, err
+    end
+    local profiles, profile_err = list_pages(host, "/inference-profiles", "inferenceProfileSummaries",
+        "maxResults=1000&typeEquals=SYSTEM_DEFINED")
+    if not profiles then
+        return nil, profile_err
+    end
+    local catalog = _M.build_catalog(foundation, profiles, GEO_PREFIX[region_name:match("^(%a+)%-") or ""])
+    if dict and #catalog.data > 0 then
+        dict:set(key, cjson.encode(catalog), CATALOG_TTL)
+    end
+    return catalog
 end
 
 return _M

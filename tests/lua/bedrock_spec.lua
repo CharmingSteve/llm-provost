@@ -129,3 +129,67 @@ describe("bedrock credential caching", function()
         assert.is_truthy(sign())
     end)
 end)
+
+describe("bedrock model catalog", function()
+    local bedrock
+
+    setup(function()
+        package.loaded["resty.aws"] = function() return {} end
+        package.loaded["resty.aws.request.sign"] = function() return {} end
+        package.loaded["resty.http"] = {}
+        package.loaded.bedrock = nil
+        bedrock = require("bedrock")
+    end)
+
+    local function profile(id, base)
+        return { inferenceProfileId = id, status = "ACTIVE",
+            models = { { modelArn = "arn:aws:bedrock:us-east-1::foundation-model/" .. base } } }
+    end
+
+    local function model(id, types, extra)
+        local entry = { modelId = id, inferenceTypesSupported = types, inputModalities = { "TEXT" },
+            outputModalities = { "TEXT" }, modelLifecycle = { status = "ACTIVE" } }
+        for key, value in pairs(extra or {}) do entry[key] = value end
+        return entry
+    end
+
+    local function ids(catalog)
+        local out = {}
+        for _, item in ipairs(catalog.data) do out[#out + 1] = item.id end
+        return out
+    end
+
+    it("lists the id Converse accepts for each chat model and drops the rest", function()
+        local catalog = bedrock.build_catalog({
+            model("openai.gpt-oss-20b-1:0", { "ON_DEMAND" }),
+            model("anthropic.claude-opus-4-8", { "INFERENCE_PROFILE" }),
+            model("meta.llama3-1-8b-instruct-v1:0", { "INFERENCE_PROFILE" }),
+            model("only.provisioned", { "PROVISIONED" }),
+            model("amazon.nova-2-sonic-v1:0", { "ON_DEMAND" }, { outputModalities = { "SPEECH", "TEXT" } }),
+            model("cohere.rerank-v3-5:0", { "ON_DEMAND" }),
+            model("twelvelabs.pegasus-1-5-v1:0", { "INFERENCE_PROFILE" }),
+            model("writer.palmyra-x5-v1:0", { "ON_DEMAND" }, { modelLifecycle = { status = "LEGACY" } }),
+            model("amazon.titan-embed-text-v2:0", { "ON_DEMAND" }, { outputModalities = { "EMBEDDING" } }),
+            model("no.profile.yet", { "INFERENCE_PROFILE" }),
+        }, {
+            profile("global.anthropic.claude-opus-4-8", "anthropic.claude-opus-4-8"),
+            profile("us.anthropic.claude-opus-4-8", "anthropic.claude-opus-4-8"),
+            profile("global.meta.llama3-1-8b-instruct-v1:0", "meta.llama3-1-8b-instruct-v1:0"),
+            { inferenceProfileId = "us.meta.llama3-1-8b-instruct-v1:0", status = "INACTIVE",
+                models = { { modelArn = "arn:x::foundation-model/meta.llama3-1-8b-instruct-v1:0" } } },
+        }, "us.")
+        assert.same({
+            "global.meta.llama3-1-8b-instruct-v1:0",
+            "openai.gpt-oss-20b-1:0",
+            "us.anthropic.claude-opus-4-8",
+        }, ids(catalog))
+        assert.equals("list", catalog.object)
+    end)
+
+    it("uses the global profile when the region has no geography prefix", function()
+        local catalog = bedrock.build_catalog({ model("a.b", { "INFERENCE_PROFILE" }) },
+            { profile("us.a.b", "a.b"), profile("global.a.b", "a.b") }, nil)
+        assert.same({ "global.a.b" }, ids(catalog))
+    end)
+end)
+
