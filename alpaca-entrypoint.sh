@@ -68,6 +68,12 @@ else:
     print("[patch] Trading base URL function not found — skipping.")
 PYEOF
 
+# fastmcp >= 3.4 rejects unknown Host headers with 421 (DNS-rebinding protection) when
+# bound to 0.0.0.0. Allow only the internal service name used by llm-provost and loopback;
+# override with FASTMCP_HTTP_ALLOWED_HOSTS (JSON list) if the service is renamed.
+FASTMCP_HTTP_ALLOWED_HOSTS="${FASTMCP_HTTP_ALLOWED_HOSTS:-[\"alpaca-mcp:8088\",\"127.0.0.1:8088\",\"localhost:8088\"]}"
+export FASTMCP_HTTP_ALLOWED_HOSTS
+
 # Inform startup logs that process handoff is about to happen.
 echo "[entrypoint] Starting MCP Server with streamable-http transport..."
 # Replace shell process with the MCP server process (PID 1 handoff).

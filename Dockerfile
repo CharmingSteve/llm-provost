@@ -1,4 +1,6 @@
-FROM openresty/openresty:jammy
+# openresty/openresty:1.31.1.1-jammy (multi-arch index digest, pushed 2026-10-10)
+# arm64 manifest: sha256:b4fa3c6ef599fda4b460c20c91538503abf55fb74248d7898dafb114d61d91af
+FROM openresty/openresty:1.31.1.1-jammy@sha256:e3ed236b49df37cda9b838568b3cf144812f7fe4eda28ceaf4572545b4db1203
 
 # hadolint ignore=DL3008
 RUN apt-get update \

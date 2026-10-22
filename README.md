@@ -242,13 +242,17 @@ BEDROCK_AWS_DEFAULT_REGION=us-east-1
 BEDROCK_MODEL=openai.gpt-oss-20b-1:0
 ```
 
-LibreChat sends Bedrock requests to `http://llm-provost:8000/llm/v1` with a `bedrock/` model id. The proxy applies its rules and audit capture first, then SigV4-signs the approved request to `bedrock-runtime.<region>.amazonaws.com` (`/openai/v1/...`) without recording credentials or signing headers. Choose a model that supports Amazon Bedrock's OpenAI-compatible Chat Completions API; the default is verified against that API.
+LibreChat sends Bedrock requests to `http://llm-provost:8000/llm/v1` with a `bedrock/` model id, exactly like every other backend. The proxy applies its rules and audit capture to the OpenAI request first, then translates it to Bedrock's native **Converse** API ([lua/bedrock_converse.lua](lua/bedrock_converse.lua)) and SigV4-signs it to `bedrock-runtime.<region>.amazonaws.com/model/<id>/converse` (or `/converse-stream`) without recording credentials or signing headers. Responses are translated back, so clients see standard OpenAI JSON and SSE. Bedrock's OpenAI-compatible endpoint is not used: it serves only some model families and returns 404 for Claude, Llama and Nova.
 
-- **Region:** `BEDROCK_AWS_DEFAULT_REGION`, then `AWS_REGION`, then `us-east-1`. The signed host is derived from the region; the `bedrock` URL in `LLM_ROUTES_JSON` must still be present and valid.
+Supported on the Bedrock route: `POST /chat/completions` (streaming, `stream_options.include_usage`, system/developer messages, tools and `tool_choice`, tool results, `temperature`, `top_p`, `stop`, `max_tokens` / `max_completion_tokens`, and base64 `data:` images) and `GET /models`. Remote image URLs, embeddings and other paths are rejected. Models that return reasoning (for example Claude with extended thinking) have it exposed as `reasoning_content`.
+
+- **Region:** `BEDROCK_AWS_DEFAULT_REGION` when set (explicit pin), otherwise auto-detected: the `region` of `AWS_PROFILE` in the mounted `~/.aws/config`, then EC2 instance metadata (IMDSv2, the host or EKS/ECS node; skip with `AWS_EC2_METADATA_DISABLED=true`), then `AWS_REGION` / `AWS_DEFAULT_REGION` (injected into ECS tasks and EKS pods), then `us-east-1`. The config file and metadata deliberately win over `AWS_REGION`, which the compose file also uses for the Fluent Bit S3 bucket. Invalid region names are ignored. The chosen region and its source are logged once at startup. The signed host is derived from the region; the `bedrock` URL in `LLM_ROUTES_JSON` must still be present and valid.
+- **Global inference:** `BEDROCK_GLOBAL_INFERENCE=true` lists and invokes `global.*` cross-Region inference profiles wherever AWS offers one (about 10% cheaper than geographic profiles), but requests may then be processed in any commercial AWS Region, so do not enable it where GDPR or data residency applies. With `false` (the default), the list uses only in-region ids or your region's geography profile (`us.`, `eu.`, `apac.`, ...), models offered only through `global.` or another geography are omitted, and requests naming a `global.` id or ARN are rejected with 403 `BEDROCK_GLOBAL_INFERENCE_DISABLED`. Application inference profiles can wrap a global profile, so enforce residency in IAM too (for example deny `bedrock:InvokeModel*` when `aws:RequestedRegion` is `unspecified`).
 - **Credentials:** `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (and optional `AWS_SESSION_TOKEN`) in the proxy environment, otherwise the shared credentials file mounted read-only from `~/.aws` (change the host directory with `AWS_SHARED_CREDENTIALS_DIR`, pick a profile with `AWS_PROFILE`, default `default`). ECS/EKS task credentials and EC2 instance metadata are not resolved by the proxy yet. Credentials are cached for 5 minutes and dropped immediately when Bedrock returns 401/403.
-- **Model list:** `GET /llm/bedrock/v1/models` makes a signed `ListFoundationModels` call and returns text-output models, which LibreChat uses with `fetch: true`.
+- **Model list (static):** `GET /llm/bedrock/v1/models` (and the `bedrock/...` entries of `GET /llm/v1/models`) is built from AWS metadata only: signed `ListFoundationModels` and `ListInferenceProfiles` calls, cached for one hour in a shared dict. The proxy never probes models, so the list does not reflect what your account may invoke. It keeps text-output chat models that are not LEGACY, drops speech, rerank and video-understanding models, and lists the id Converse accepts: the plain model id when AWS serves it on demand, otherwise your region's geography profile such as `us.` (with global inference enabled, the `global.` profile is preferred whenever one exists). Only serverless, pay-per-token models are listed: models offered only as Provisioned Throughput are dropped, and Amazon Bedrock Marketplace models never appear because they run on SageMaker endpoints that must be deployed explicitly (with an instance type) and are not returned by `ListFoundationModels`. **Only on-demand:** chat requests are allowed only for an id in this list; any other id or ARN (provisioned throughput, Marketplace/SageMaker endpoint, custom model deployment, application inference profile) is rejected with 403 `BEDROCK_MODEL_NOT_ALLOWED` before signing, and if the list cannot be loaded requests fail closed with 503 `BEDROCK_CATALOG_UNAVAILABLE`. Invoking a model never provisions capacity; the first call to a third-party serverless model (for example Anthropic or Meta) only creates a pay-per-token AWS Marketplace subscription, which you can block by denying `aws-marketplace:Subscribe` to the proxy's identity. Models you have not enabled still appear and fail with the AWS error, passed through as an OpenAI-shaped error. Typical causes are the Anthropic use-case form not being submitted, a data-retention setting, or a model not available to the account. Restart the proxy to refresh the list before the cache expires.
+- **Default model:** `BEDROCK_MODEL` must be an id from that list; use the inference-profile id for models that are not served on demand (for example `us.anthropic.claude-opus-4-8`).
 - **Disabling:** with `BEDROCK_ENABLED` not `true`, Bedrock requests return HTTP 404.
-- **IAM:** grant the identity only `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` and `bedrock:ListFoundationModels`, scoped to the models you allow.
+- **IAM:** grant the identity only `bedrock:Converse`-class invocation permissions (`bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream`, which cover Converse and ConverseStream), `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles`, scoped to the models and inference profiles you allow. Cross-region profiles also need access to the underlying foundation models in each destination region; `global.` profiles additionally need the global profile ARN and the foundation model ARN with region `*` (see the AWS global cross-Region inference docs).
 
 ### Routing Tests
 
@@ -350,7 +354,7 @@ Interventions write to both directories. A request blocked by policy (for exampl
 
 ### Reasoning Display
 
-Bedrock's OpenAI-compatible endpoint returns gpt-oss reasoning inline in the message content as `<reasoning>...</reasoning>`. LibreChat renders reasoning only from a `reasoning_content` field or `<think>` tags, so by default the reasoning shows up as raw text and leaks into auto-generated conversation titles. Set `REASONING_DISPLAY` to normalize the client-bound response on `/llm/*` routes:
+Bedrock gpt-oss models return reasoning inline in the message content as `<reasoning>...</reasoning>`. LibreChat renders reasoning only from a `reasoning_content` field or `<think>` tags, so by default the reasoning shows up as raw text and leaks into auto-generated conversation titles. Set `REASONING_DISPLAY` to normalize the client-bound response on `/llm/*` routes:
 
 | Value | Effect |
 |-------|--------|
@@ -430,3 +434,94 @@ See [LICENSE](LICENSE).
 ## Support
 
 Open an issue or discussion if you need changes to the governance model, deployment shape, or compliance posture.
+
+## Local synthetic patients (HAPI, for editing as a clinician)
+
+This section sets up a **local, persistent** HAPI FHIR server loaded with
+Synthea synthetic patients. It is separate from the governed `/mcp/fhir` path:
+the app can search and read these patients, but it cannot edit them (see
+[Editing patients](#editing-patients)). Use synthetic data only.
+
+### 1. Download the Synthea sample bundles
+
+```sh
+mkdir -p ~/synthea-fhir && cd ~/synthea-fhir
+curl -L -o synthea-fhir-r4.zip \
+  https://synthetichealth.github.io/synthea-sample-data/downloads/synthea_sample_data_fhir_r4_sep2019.zip
+unzip synthea-fhir-r4.zip -d synthea-fhir
+```
+
+The bundles are in `~/synthea-fhir/synthea-fhir/fhir/` (one transaction Bundle
+per patient, about 1,180 files). Keep them outside this repository.
+
+### 2. Start HAPI with a file-backed database
+
+The `hapiproject/hapi` image defaults to an in-memory H2 database, so anything
+imported is lost on every restart. Point it at a file database on a named volume:
+
+```sh
+# The image runs as 65532; the new volume must be writable by that user.
+docker volume create hapi-data
+docker run --rm -u 0 -v hapi-data:/data alpine chown -R 65532:65532 /data
+
+docker run -d --name hapi-fhir --restart unless-stopped \
+  -p 8080:8080 \
+  -v hapi-data:/data \
+  -e hapi.fhir.default_encoding=json \
+  -e SPRING_DATASOURCE_URL='jdbc:h2:file:/data/h2' \
+  hapiproject/hapi:latest
+```
+
+Wait until `curl -s http://localhost:8080/fhir/metadata -o /dev/null -w '%{http_code}'`
+prints `200`. Confirm the database is file-backed with
+`docker logs hapi-fhir 2>&1 | grep 'jdbc:h2:file'`.
+
+### 3. Import the patients
+
+```sh
+python3 -I scripts/import_synthea.py ~/synthea-fhir/synthea-fhir/fhir http://localhost:8080/fhir
+```
+
+The script POSTs each bundle, prints progress every 50 files, and lists any
+failures on stderr. It takes several minutes. Check the result:
+
+```sh
+curl -s 'http://localhost:8080/fhir/Patient?_summary=count&_format=json'
+```
+
+The `total` should be about 1,180. Restart `hapi-fhir` (`docker restart hapi-fhir`)
+and re-run the count to confirm the data persisted.
+
+### 4. Point the app at it
+
+Set `FHIR_BASE_URL=http://host.docker.internal:8080/fhir` in `.env`, then
+recreate the stack (`scripts/provost-compose.sh up`). Search through
+`http://localhost:8000/mcp/fhir` now returns the imported patients.
+
+### Editing patients
+
+The app's FHIR policy (`rules.json`, `mcp_servers.fhir`) allows `create` only for
+clinical types and blocks `update` and `delete` entirely, so Patient demographics
+cannot be changed through Provost. To edit records as a clinician, use HAPI's REST
+API directly. That path is **not governed or audited by Provost**; it is for the
+local synthetic dataset only.
+
+```sh
+# Find the patient
+curl -s 'http://localhost:8080/fhir/Patient?family=Stevens&_format=json'
+
+# Change a field with a JSON Patch (replace PATIENT_ID)
+curl -s -X PATCH "http://localhost:8080/fhir/Patient/PATIENT_ID" \
+  -H 'Content-Type: application/json-patch+json' \
+  -d '[{"op":"replace","path":"/birthDate","value":"1980-04-02"}]'
+```
+
+Clinical resources (Observation, Condition, MedicationRequest, and the other
+types in `write_resource_allowlist`) can still be added through the app with
+`create`. Full replacement is also available with `PUT /fhir/Patient/PATIENT_ID`
+and the complete resource body.
+
+### Resetting the dataset
+
+`docker rm -f hapi-fhir` and `docker volume rm hapi-data` delete all imported
+data. Re-run steps 2 and 3 to reload.

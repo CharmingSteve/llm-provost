@@ -291,7 +291,16 @@ if not is_mcp_path and aggregate_path ~= "/models" then
         if os.getenv("BEDROCK_ENABLED") ~= "true" then
             return reject_route("Bedrock backend is disabled", ngx.HTTP_NOT_FOUND, "BEDROCK_DISABLED")
         end
-        ngx.var.bedrock_path = "/openai/v1" .. backend_path
+        -- Bedrock is reached through the native Converse API; the OpenAI
+        -- request is translated after rules and audit have seen it.
+        if backend_path ~= "/chat/completions" and backend_path ~= "/models" then
+            return reject_route(
+                "Bedrock supports only /chat/completions and /models",
+                ngx.HTTP_NOT_FOUND,
+                "BEDROCK_PATH_UNSUPPORTED"
+            )
+        end
+        ngx.var.bedrock_path = backend_path
     else
         ngx.var.llm_target_url = backend_url:gsub("/$", "") .. backend_path
     end
@@ -350,7 +359,27 @@ end
 
 if not is_mcp_path and (ngx.var.backend_name == "bedrock"
     or (aggregate and aggregate.backend == "bedrock")) then
-    local host, signing_error = require("bedrock").prepare_request(body)
+    local translated, translate_error = nil, nil
+    if ngx.var.bedrock_path == "/chat/completions" then
+        translated, translate_error = require("bedrock_converse").translate_request(body)
+        if not translated then
+            return reject_route(translate_error, ngx.HTTP_BAD_REQUEST, "BEDROCK_REQUEST_INVALID")
+        end
+        local model_allowed, model_error, model_status, model_code =
+            require("bedrock").check_model(translated.state.model)
+        if not model_allowed then
+            return reject_route(model_error, model_status or ngx.HTTP_FORBIDDEN,
+                model_code or "BEDROCK_MODEL_NOT_ALLOWED")
+        end
+        body = translated.body
+        ngx.req.set_body_data(body)
+        ngx.req.set_header("Content-Type", "application/json")
+        ngx.req.set_header("Accept", translated.state.stream and "application/vnd.amazon.eventstream"
+            or "application/json")
+        ngx.var.bedrock_path = translated.path
+        ngx.ctx.bedrock_converse = translated.state
+    end
+    local host, signing_error = require("bedrock").prepare_request(body, ngx.var.bedrock_path)
     if not host then
         return reject_route(
             "Bedrock authentication is unavailable",

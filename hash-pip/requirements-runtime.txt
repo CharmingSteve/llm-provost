@@ -7,17 +7,16 @@
 #   https://pypi.org/pypi/<package>/<version>/json
 
 # Package: pip
-# Version represented by these hashes: 26.1.2
-# Upgrades pip itself inside the container; fixes CVE-2026-3219 present in 26.0.1 and PYSEC-2026-196 present in 26.1
 # Version represented by these hashes: 26.2
-# Upgrades pip itself inside the container; fixes PYSEC-2026-3721 present in 26.1.2.
+# Upgrades pip itself inside the container; fixes PYSEC-2026-3721 present in 26.1.2
+# (26.1.2 previously fixed CVE-2026-3219 from 26.0.1 and PYSEC-2026-196 from 26.1).
 pip==26.2 \
     --hash=sha256:931c303696af6fa3417112103b1cad26890e5a07eccb5b99783700e33f2b8aad \
     --hash=sha256:2d8542afcc84cdd8e846c2b36b2861fad1da376dd98f8e7113e9108a3c331690
 
 # Package: uv
-# Version represented by these hashes: 0.11.10
-# Upgraded from 0.11.7; fixes rustls-webpki GHSA-82j2-j2ch-gfr8 (HIGH) via bumped rustls-webpki 0.103.13
+# Version represented by these hashes: 0.13.4 (dependabot bump from 0.11.15)
+# 0.11.10+ fixes rustls-webpki GHSA-82j2-j2ch-gfr8 (HIGH) via bumped rustls-webpki 0.103.13
 uv==0.13.4 \
     --hash=sha256:05e4332791b4d55b6dde8695b7fa6079b26991519f44760887c5dfbd5ca4fe53 \
     --hash=sha256:205a4f93e568fb24f45a2f3834f1c0a8f1adb5f396bf473c71030ed707dce048 \

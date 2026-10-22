@@ -95,6 +95,7 @@ local function install_mocks()
         end,
     }
     package.loaded.bedrock = {
+        check_model = function() return true end,
         models = function()
             local data, err = listing("bedrock")
             if type(err) == "number" then
@@ -571,13 +572,17 @@ describe("http_policy aggregate dispatch", function()
     end)
 
     it("signs the stripped body for a Bedrock-prefixed request", function()
-        local body = '{"model":"bedrock/openai.gpt-oss-20b-1:0","messages":[]}'
+        local body = '{"model":"bedrock/openai.gpt-oss-20b-1:0","messages":[{"role":"user","content":"hi"}]}'
         run("/llm/v1/chat/completions", body)
-        assert.equals('{"model":"openai.gpt-oss-20b-1:0","messages":[]}', signed)
-        assert.equals("/openai/v1/chat/completions", ngx.var.bedrock_path)
-        assert.equals("https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1/chat/completions",
+        -- The upstream copy is the stripped id translated to a Converse request.
+        local converse = require("cjson.safe").decode(signed)
+        assert.same({ { role = "user", content = { { text = "hi" } } } }, converse.messages)
+        assert.is_nil(converse.model)
+        assert.equals("/model/openai.gpt-oss-20b-1%3A0/converse", ngx.var.bedrock_path)
+        assert.equals("https://bedrock-runtime.us-east-1.amazonaws.com/model/openai.gpt-oss-20b-1%3A0/converse",
             ngx.var.llm_target_url)
         assert.equals(body, ngx.var.req_body)
+        assert.equals("openai.gpt-oss-20b-1:0", ngx.ctx.bedrock_converse.model)
     end)
 
     it("sends the selected backend only its own key and strips every key header", function()
