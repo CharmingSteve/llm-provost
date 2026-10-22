@@ -365,6 +365,12 @@ if not is_mcp_path and (ngx.var.backend_name == "bedrock"
         if not translated then
             return reject_route(translate_error, ngx.HTTP_BAD_REQUEST, "BEDROCK_REQUEST_INVALID")
         end
+        local model_allowed, model_error, model_status, model_code =
+            require("bedrock").check_model(translated.state.model)
+        if not model_allowed then
+            return reject_route(model_error, model_status or ngx.HTTP_FORBIDDEN,
+                model_code or "BEDROCK_MODEL_NOT_ALLOWED")
+        end
         body = translated.body
         ngx.req.set_body_data(body)
         ngx.req.set_header("Content-Type", "application/json")

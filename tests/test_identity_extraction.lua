@@ -15,6 +15,16 @@ local function run_policy(options)
     package.loaded.bedrock = nil
     package.preload.bedrock = function()
         return {
+            check_model = function(model_id)
+                if tostring(model_id):sub(1, 7) == "global." then
+                    return nil, "Global cross-Region inference is disabled (BEDROCK_GLOBAL_INFERENCE=false)",
+                        403, "BEDROCK_GLOBAL_INFERENCE_DISABLED"
+                end
+                if tostring(model_id):find(":provisioned-model/", 1, true) then
+                    return nil, "Model is not an on-demand Bedrock model", 403, "BEDROCK_MODEL_NOT_ALLOWED"
+                end
+                return true
+            end,
             prepare_request = function()
                 options.bedrock_calls = (options.bedrock_calls or 0) + 1
                 return "bedrock-runtime.us-east-1.amazonaws.com"
@@ -359,6 +369,35 @@ describe("four-layer identity extraction", function()
             result.var.llm_target_url
         )
         assert.equals("application/json", options.set_headers.Accept)
+    end)
+
+    it("rejects global Bedrock inference profiles before signing when global inference is off", function()
+        local options = {
+            uri = "/llm/bedrock/v1/chat/completions",
+            backend_name = "bedrock",
+            routes_json = '{"bedrock":"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"}',
+            bedrock_enabled = "true",
+            body = '{"model":"global.anthropic.claude-opus-4-8","messages":[{"role":"user","content":"hi"}]}',
+        }
+        local result = run_policy(options)
+        assert.equals(403, result.exit_status)
+        assert.is_nil(options.bedrock_calls)
+        assert.matches("Global cross-Region inference is disabled", result.response_body, 1, true)
+    end)
+
+    it("rejects non on-demand Bedrock models before signing", function()
+        local options = {
+            uri = "/llm/bedrock/v1/chat/completions",
+            backend_name = "bedrock",
+            routes_json = '{"bedrock":"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"}',
+            bedrock_enabled = "true",
+            body = '{"model":"arn:aws:bedrock:us-east-1:123456789012:provisioned-model/abc",'
+                .. '"messages":[{"role":"user","content":"hi"}]}',
+        }
+        local result = run_policy(options)
+        assert.equals(403, result.exit_status)
+        assert.is_nil(options.bedrock_calls)
+        assert.matches("not an on-demand Bedrock model", result.response_body, 1, true)
     end)
 
     it("returns 404 for an unknown LLM backend", function()

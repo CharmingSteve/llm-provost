@@ -18,7 +18,9 @@ if json.decode_array_with_array_mt then
     json.decode_array_with_array_mt(true)
 end
 local NULL = json.null
-local EMPTY_ARRAY = json.empty_array or setmetatable({}, json.empty_array_mt)
+-- A table carrying empty_array_mt encodes as [] in every lua-cjson build; the
+-- empty_array sentinel is emitted as nothing by some luarocks releases.
+local EMPTY_ARRAY = json.empty_array_mt and setmetatable({}, json.empty_array_mt) or json.empty_array
 
 local _M = {}
 

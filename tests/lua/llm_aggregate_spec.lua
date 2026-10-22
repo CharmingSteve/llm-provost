@@ -95,6 +95,7 @@ local function install_mocks()
         end,
     }
     package.loaded.bedrock = {
+        check_model = function() return true end,
         models = function()
             local data, err = listing("bedrock")
             if type(err) == "number" then

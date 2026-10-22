@@ -5,8 +5,132 @@ local http = require("resty.http")
 
 local _M = {}
 
+local function nonempty(value)
+    if value == nil or value == "" then
+        return nil
+    end
+    return value
+end
+
+-- The region becomes part of the signed hostname, so only well-formed region
+-- names (us-east-1, eu-central-1, us-gov-west-1, ...) are accepted.
+local function valid_region(value)
+    value = nonempty(value)
+    if value and value:match("^[a-z][a-z]%-[a-z%-]+%-%d+$") then
+        return value
+    end
+    return nil
+end
+
+-- true routes through global.* inference profiles (about 10% cheaper, but
+-- processed in any commercial AWS Region). Anything else keeps Bedrock
+-- traffic in the source region or its geography.
+function _M.global_inference_enabled()
+    return os.getenv("BEDROCK_GLOBAL_INFERENCE") == "true"
+end
+
+-- `region` of the active profile in the shared AWS config file. The default
+-- profile is [default]; others are [profile name] (bare [name] is accepted).
+local function config_file_region()
+    local path = nonempty(os.getenv("AWS_CONFIG_FILE")) or "/home/provost/.aws/config"
+    local profile = nonempty(os.getenv("AWS_PROFILE")) or "default"
+    local wanted = { [profile] = true, ["profile " .. profile] = true }
+    local file = io.open(path, "r")
+    if not file then
+        return nil
+    end
+    local current, found = false, nil
+    for line in file:lines() do
+        local section = line:match("^%s*%[%s*(.-)%s*%]%s*$")
+        if section then
+            current = wanted[section] == true
+        elseif current then
+            found = found or line:match("^%s*region%s*=%s*(%S+)%s*$")
+        end
+    end
+    file:close()
+    return found
+end
+
+-- Region of the EC2 host (instance, ECS/EKS node) from IMDSv2. Skipped when
+-- AWS_EC2_METADATA_DISABLED=true; fails fast off EC2.
+local IMDS = "http://169.254.169.254"
+local function imds_region()
+    if os.getenv("AWS_EC2_METADATA_DISABLED") == "true" or type(http.new) ~= "function" then
+        return nil
+    end
+    local ok, result = pcall(function()
+        local requester = http.new()
+        requester:set_timeout(1000)
+        local token = requester:request_uri(IMDS .. "/latest/api/token", {
+            method = "PUT",
+            headers = { ["X-aws-ec2-metadata-token-ttl-seconds"] = "60" },
+        })
+        if not token or token.status ~= 200 or not nonempty(token.body) then
+            return nil
+        end
+        local response = requester:request_uri(IMDS .. "/latest/meta-data/placement/region", {
+            method = "GET",
+            headers = { ["X-aws-ec2-metadata-token"] = token.body },
+        })
+        return response and response.status == 200 and response.body or nil
+    end)
+    return ok and result or nil
+end
+
+-- Resolution order:
+--   1. BEDROCK_AWS_DEFAULT_REGION (explicit pin)
+--   2. region of AWS_PROFILE in the shared config file (~/.aws/config)
+--   3. EC2 instance metadata (the server or node the container runs on)
+--   4. AWS_REGION / AWS_DEFAULT_REGION (injected into ECS tasks and EKS pods)
+--   5. us-east-1
+local REGION_KEY = "region"
+local resolved_region
+
 local function region()
-    return os.getenv("BEDROCK_AWS_DEFAULT_REGION") or os.getenv("AWS_REGION") or "us-east-1"
+    if resolved_region then
+        return resolved_region
+    end
+    local dict = ngx and ngx.shared and ngx.shared.bedrock_creds
+    local cached = dict and valid_region(dict:get(REGION_KEY))
+    if cached then
+        resolved_region = cached
+        return cached
+    end
+
+    local explicit = nonempty(os.getenv("BEDROCK_AWS_DEFAULT_REGION"))
+    if explicit and not valid_region(explicit) and ngx and ngx.log then
+        ngx.log(ngx.ERR, "bedrock: ignoring invalid BEDROCK_AWS_DEFAULT_REGION")
+    end
+    local value, source = valid_region(explicit), "BEDROCK_AWS_DEFAULT_REGION"
+    if not value then
+        value, source = valid_region(config_file_region()), "aws config"
+    end
+    if not value then
+        value, source = valid_region(imds_region()), "instance metadata"
+    end
+    if not value then
+        value, source = valid_region(os.getenv("AWS_REGION")), "AWS_REGION"
+    end
+    if not value then
+        value, source = valid_region(os.getenv("AWS_DEFAULT_REGION")), "AWS_DEFAULT_REGION"
+    end
+    if not value then
+        value, source = "us-east-1", "fallback"
+    end
+    if ngx and ngx.log then
+        ngx.log(ngx.NOTICE, "bedrock: region ", value, " from ", source,
+                ", global inference ", _M.global_inference_enabled() and "on" or "off")
+    end
+    resolved_region = value
+    if dict then
+        dict:set(REGION_KEY, value)
+    end
+    return value
+end
+
+function _M.region()
+    return region()
 end
 
 -- Explicitly parse the shared credentials file (ini format).
@@ -186,31 +310,36 @@ local function is_chat_model(model)
     return true
 end
 
--- Picks the id Converse accepts for a model: the plain id when AWS serves it
--- on demand, otherwise a system inference profile (region geography first,
--- then global).
-local function invocation_id(model, profile_ids, geo_prefix)
+-- Picks the id Converse accepts for a model.
+--   allow_global: the global.* profile when AWS offers one (discounted),
+--                 otherwise the in-region id, otherwise the geography profile.
+--   otherwise:    the in-region id when AWS serves it on demand, otherwise the
+--                 profile of the region's own geography (us., eu., apac., ...).
+--                 global.* and other geographies are never chosen, so models
+--                 offered only through them are left out of the list.
+local function invocation_id(model, profile_ids, geo_prefix, allow_global)
+    local geo, global
+    for _, id in ipairs(profile_ids or {}) do
+        if geo_prefix and id:sub(1, #geo_prefix) == geo_prefix then
+            geo = geo or id
+        elseif id:sub(1, 7) == "global." then
+            global = global or id
+        end
+    end
+    if allow_global and global then
+        return global
+    end
     if contains(model.inferenceTypesSupported, "ON_DEMAND") then
         return model.modelId
     end
     if not contains(model.inferenceTypesSupported, "INFERENCE_PROFILE") then
         return nil
     end
-    local geo, global, other
-    for _, id in ipairs(profile_ids or {}) do
-        if geo_prefix and id:sub(1, #geo_prefix) == geo_prefix then
-            geo = geo or id
-        elseif id:sub(1, 7) == "global." then
-            global = global or id
-        else
-            other = other or id
-        end
-    end
-    return geo or global or other
+    return geo
 end
 
 -- Pure: builds the OpenAI model listing from the two AWS listings.
-function _M.build_catalog(foundation_models, inference_profiles, geo_prefix)
+function _M.build_catalog(foundation_models, inference_profiles, geo_prefix, allow_global)
     local profiles_by_model = {}
     for _, profile in ipairs(inference_profiles or {}) do
         if profile.status == "ACTIVE" and type(profile.inferenceProfileId) == "string" then
@@ -230,7 +359,7 @@ function _M.build_catalog(foundation_models, inference_profiles, geo_prefix)
             if ids then
                 table.sort(ids)
             end
-            local id = invocation_id(model, ids, geo_prefix)
+            local id = invocation_id(model, ids, geo_prefix, allow_global)
             if id then
                 table.insert(models, { id = id, object = "model", owned_by = "amazon-bedrock" })
             end
@@ -289,12 +418,51 @@ end
 local CATALOG_KEY = "catalog:"
 local CATALOG_TTL = 3600
 
+-- Pure: true when model_id is one of the catalog's on-demand ids.
+function _M.catalog_allows(catalog, model_id)
+    if type(model_id) ~= "string" or type(catalog) ~= "table" or type(catalog.data) ~= "table" then
+        return false
+    end
+    for _, item in ipairs(catalog.data) do
+        if item.id == model_id then
+            return true
+        end
+    end
+    return false
+end
+
+-- Only ids from the on-demand catalog may be invoked. This rejects
+-- provisioned-throughput, Marketplace (SageMaker) endpoint, custom-deployment
+-- and application-profile ARNs, and global.* profiles unless global inference
+-- is enabled. Returns true, or nil, message, HTTP status, error code.
+function _M.check_model(model_id)
+    local id = string.lower(tostring(model_id or ""))
+    if not _M.global_inference_enabled()
+        and (id:sub(1, 7) == "global." or id:find("inference-profile/global.", 1, true)) then
+        return nil, "Global cross-Region inference is disabled (BEDROCK_GLOBAL_INFERENCE=false)",
+            403, "BEDROCK_GLOBAL_INFERENCE_DISABLED"
+    end
+    local catalog, err = _M.models()
+    if not catalog then
+        if ngx and ngx.log then
+            ngx.log(ngx.ERR, "bedrock: model catalog unavailable, refusing request: ", tostring(err))
+        end
+        return nil, "Bedrock model catalog unavailable", 503, "BEDROCK_CATALOG_UNAVAILABLE"
+    end
+    if not _M.catalog_allows(catalog, model_id) then
+        return nil, "Model is not an on-demand Bedrock model from GET /llm/bedrock/v1/models",
+            403, "BEDROCK_MODEL_NOT_ALLOWED"
+    end
+    return true
+end
+
 -- The listing is derived from AWS metadata (no per-model probing) and cached
 -- for an hour; it is therefore static between refreshes.
 function _M.models()
     local region_name = region()
+    local allow_global = _M.global_inference_enabled()
     local dict = creds_cache()
-    local key = CATALOG_KEY .. region_name
+    local key = CATALOG_KEY .. region_name .. (allow_global and ":global" or ":regional")
     local cached = dict and dict:get(key)
     if cached then
         local decoded = cjson.decode(cached)
@@ -313,7 +481,8 @@ function _M.models()
     if not profiles then
         return nil, profile_err
     end
-    local catalog = _M.build_catalog(foundation, profiles, GEO_PREFIX[region_name:match("^(%a+)%-") or ""])
+    local catalog = _M.build_catalog(foundation, profiles, GEO_PREFIX[region_name:match("^(%a+)%-") or ""],
+        allow_global)
     if dict and #catalog.data > 0 then
         dict:set(key, cjson.encode(catalog), CATALOG_TTL)
     end

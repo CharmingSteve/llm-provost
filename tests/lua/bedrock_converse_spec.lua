@@ -80,7 +80,8 @@ describe("bedrock converse request translation", function()
             tool_choice = "required",
             tools = { { type = "function", ["function"] = {
                 name = "get_weather", description = "d",
-                parameters = { type = "object", properties = {}, required = cjson.empty_array } } } },
+                parameters = { type = "object", properties = {},
+                    required = setmetatable({}, cjson.empty_array_mt) } } } },
         })
         assert.equals("get_weather", body.toolConfig.tools[1].toolSpec.name)
         assert.same({}, body.toolConfig.tools[1].toolSpec.inputSchema.json.required)
