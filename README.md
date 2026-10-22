@@ -285,7 +285,6 @@ The schema currently includes:
 - rate_limits
 - token_caps
 - time_based_rules
-- logging_rules
 - llm_rules
 - mcp_servers (per-server overrides and deterministic rules, including `alpaca`)
 

@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # New tool policies belong under mcp_servers so discovery can verify their scope.
 GLOBAL_RULES = {
     "tool_allowlist", "tool_blocklist", "rate_limits", "token_caps",
-    "time_based_rules", "logging_rules", "llm_rules",
+    "time_based_rules", "llm_rules",
 }
 
 
