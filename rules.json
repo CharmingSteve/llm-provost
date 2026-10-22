@@ -58,16 +58,6 @@
       ]
     }
   },
-  "logging_rules": {
-    "enabled": true,
-    "description": "Require identity-rich audit logging.",
-    "params": {
-      "always_log_user_id": true,
-      "always_log_customer_id": true,
-      "always_log_tool_name": true,
-      "redact_prompt_content": false
-    }
-  },
   "llm_rules": {
     "enabled": true,
     "description": "Governance for LLM chat requests (non-MCP paths): PII filtering on prompts and token caps.",
