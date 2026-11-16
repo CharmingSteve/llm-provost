@@ -22,7 +22,7 @@ setup() {
   grep -q '"rate_limits"' "$ROOT_DIR/rules.json"
   grep -q '"token_caps"' "$ROOT_DIR/rules.json"
   grep -q '"time_based_rules"' "$ROOT_DIR/rules.json"
-  grep -q '"logging_rules"' "$ROOT_DIR/rules.json"
+  ! grep -q '"logging_rules"' "$ROOT_DIR/rules.json"
   grep -q '"llm_rules"' "$ROOT_DIR/rules.json"
 }
 

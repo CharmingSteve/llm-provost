@@ -117,23 +117,6 @@ Restrict tool use to approved windows.
 }
 ```
 
-### `logging_rules`
-
-These settings define audit expectations for every request.
-
-```json
-"logging_rules": {
-  "enabled": true,
-  "description": "Require identity-rich audit logging.",
-  "params": {
-    "always_log_user_id": true,
-    "always_log_customer_id": true,
-    "always_log_tool_name": true,
-    "redact_prompt_content": false
-  }
-}
-```
-
 ### LLM prompt PII handling
 
 `llm_rules.params.pii_block` hard-blocks matching prompts with HTTP 403. Names
