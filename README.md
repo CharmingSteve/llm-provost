@@ -79,11 +79,11 @@ When a policy blocks a request, two records are written with the same `request_i
 1. An access record with HTTP status `403` under `access/`.
 2. An error record under `error/` with `error_code: PROVOST_INTERVENTION` and `error_detail` containing the rule reason (the `PROVOST_INTERVENTION:` prefix). The `stream_tag` names the boundary that blocked it (`provost_llm_to_mcp_error`, `provost_mcp_to_api_error`, or `provost_fhir_error`).
 
-The demo video linked above shows the deterministic rules blocking calls and the corresponding audit records in the logs.
+The demo video linked above shows the deterministic rules working, with the resulting entries in the logs. The record shape above is taken from the README's audit description; no sample record is reproduced here.
 
 ## Supporting Evidence
 
-- **Demo:** [LLM Provost Demo video](https://www.youtube.com/watch?v=BEWJ4VHBHFk). It shows the deterministic rules enforcing policy, with the resulting audit log entries.
+- **Demo:** [LLM Provost Demo video](https://www.youtube.com/watch?v=BEWJ4VHBHFk). It shows the deterministic rules working, with the resulting entries in the logs.
 - **Product site:** [floatingcloud.io](https://floatingcloud.io).
 - **Automated tests:** the repository includes Lua, shell, Bats, and Python tests under `tests/`, including `tests/lua/proxy_headers_spec.lua`, `tests/lua/circuit_breaker_spec.lua`, `tests/test_audit_contract.lua`, `tests/test_identity_extraction.lua`, `tests/test_audit_logs.py`, `tests/test_rule_tool_scopes.py`, and `tests/test_forbidden_endpoints.sh`. Run the routing checks with:
   ```sh
