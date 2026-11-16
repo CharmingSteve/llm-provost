@@ -9,9 +9,17 @@ Governance proxy and audit ledger for MCP-mediated LLM interactions.
 LLM Provost is a mandatory policy and observability boundary that sits in front of MCP servers and upstream model/tool APIs.
 It is designed for secure, sovereign operation: you run it in your own environment, control the policy file, and own the audit logs.
 
-## What It Does
+## The Problem
 
-LLM Provost provides all of the following in one control point:
+AI agents that call tools (trading APIs, patient records, databases, cloud services) can take actions no one authorized, and some of those actions cannot be undone: an order that executes, a record that is overwritten, data that is sent to a third party. Relying on the model to refuse risky actions is not a reliable control. LLM Provost moves the decision out of the model and into a deterministic policy layer that the agent cannot bypass, and records every decision.
+
+## What It Does (Summary)
+
+- **Deterministic guardrails** on every MCP tool call and LLM request: allow/block lists, default-deny for unknown tools, rate limits, token caps, and time windows. Rules are plain JSON evaluated by Lua, not by a model.
+- **Irreversible-action protections** in the trading and FHIR controls: order size and notional caps, replacement-order and close-position guards, and a read-only REST boundary for FHIR that rejects every write method.
+- **Full audit trail**: every governed request is captured with identity and correlation IDs, and every intervention is logged with the rule that caused it.
+
+Each control is detailed below. Demo video:
 
 LLM Provost Demo:
 [![LLM Provost Demo](https://img.youtube.com/vi/BEWJ4VHBHFk/0.jpg)](https://www.youtube.com/watch?v=BEWJ4VHBHFk)
@@ -49,6 +57,59 @@ The current implementation and policy model include:
 9. Four-layer identity restoration on the outbound MCP-to-API boundary
 10. Hot-reload rules from rules.json (10-second mtime polling)
 11. Containerized deployment for repeatable operations
+
+## Safety Approach: Preventing Unauthorized and Irreversible Actions
+
+LLM Provost is a policy enforcement point, not a prompt-level instruction. The agent never talks to a tool or upstream API directly, so a model that is manipulated, confused, or simply wrong cannot skip the check.
+
+How it works:
+
+- **Mediation, not advice.** Every MCP tool call passes through the proxy and is evaluated before execution. Blocked calls return HTTP 403 with the reason (for example `tool not in allowlist: <name>`). The model never receives a path around the check.
+- **Default-deny where it matters.** The FHIR policy allows only `search`, `read`, `get_capabilities`, and `get_user`. Unknown tools and all writes receive 403, even though the write tools remain visible to the client.
+- **Fail closed.** Missing, malformed, or invalid routing configuration returns HTTP 500. An unknown LLM backend returns 404. A Bedrock model not on the on-demand allowlist returns 403, and an unavailable catalog returns 503. None of these fall back to a permissive default.
+- **Irreversible-action guards (trading).** Order share and notional caps, cumulative notional limits, per-symbol cooldowns, replacement-order caps, `prevent_market_order_upgrade`, and close-position limits all run before the order reaches the broker.
+- **Irreversible-action guards (data).** The FHIR REST boundary accepts only GET and HEAD, so no write can reach the backend through the governed path.
+- **Deterministic and inspectable.** Rules are JSON in `rules.json` and are evaluated in Lua (`lua/rules_engine.lua`, `lua/trading_rules.lua`). The same input always produces the same decision, and the decision is visible in the logs.
+- **Hot reload with safe failure.** Policy changes apply within 10 seconds. An invalid policy is rejected, and the last known good policy stays active.
+
+### Example: a blocked action and its evidence
+
+When a policy blocks a request, two records are written with the same `request_id`:
+
+1. An access record with HTTP status `403` under `access/`.
+2. An error record under `error/` with `error_code: PROVOST_INTERVENTION` and `error_detail` containing the rule reason (the `PROVOST_INTERVENTION:` prefix). The `stream_tag` names the boundary that blocked it (`provost_llm_to_mcp_error`, `provost_mcp_to_api_error`, or `provost_fhir_error`).
+
+The demo video linked above shows the deterministic rules blocking calls and the corresponding audit records in the logs.
+
+## Supporting Evidence
+
+- **Demo:** [LLM Provost Demo video](https://www.youtube.com/watch?v=BEWJ4VHBHFk). It shows the deterministic rules enforcing policy, with the resulting audit log entries.
+- **Product site:** [floatingcloud.io](https://floatingcloud.io).
+- **Automated tests:** the repository includes Lua, shell, Bats, and Python tests under `tests/`, including `tests/lua/proxy_headers_spec.lua`, `tests/lua/circuit_breaker_spec.lua`, `tests/test_audit_contract.lua`, `tests/test_identity_extraction.lua`, `tests/test_audit_logs.py`, `tests/test_rule_tool_scopes.py`, and `tests/test_forbidden_endpoints.sh`. Run the routing checks with:
+  ```sh
+  busted tests/lua/proxy_headers_spec.lua tests/lua/circuit_breaker_spec.lua
+  bats tests/shell/test_entrypoint.bats tests/shell/test_verify_proxy_routing.bats
+  ```
+- **Integration checks:** `sh verify_proxy_routing.sh` against a running stack verifies the four identity layers and confirms the bearer token does not appear in logs. CI runs the same flow with a random per-run token.
+- **FHIR conformance:** CI runs the real pinned WSO2 `fhir-mcp` server against a synthetic REST mock and checks initialize, list, search, read, denied writes, outbound routing, and audit records.
+- **Documentation:** [RULES_ENGINE.md](RULES_ENGINE.md) for every rule, [config/librechat.yaml](config/librechat.yaml) for client wiring, and [schemas/](schemas/) for the audit record format.
+- **Architecture:** diagram in `wiki/agent-provost-architechture.png` (see [Architecture](#architecture)).
+
+## Limitations
+
+Known weaknesses and areas for improvement:
+
+- **Policy is only as good as the rules.** LLM Provost enforces the rules written in `rules.json`. It does not detect novel attacks or judge whether an allowed action is wise. Policy review is still a human task.
+- **Scope of enforcement.** Only traffic through the proxy is governed. The local HAPI editing path in this README (see [Editing patients](#editing-patients)) is deliberately outside Provost and is not audited.
+- **Shared public data.** The default FHIR backend (`hapi.fhir.org`) is a shared, unauthenticated sandbox. Its availability and content are not deterministic, so live tests are opt-in (`FHIR_LIVE_TESTS=true`). Use synthetic data only.
+- **Correlation gap on FHIR REST.** WSO2 does not forward request correlation headers on its REST calls. Outbound FHIR records therefore use `unknown` user and `none` conversation, and end-to-end caller correlation needs upstream support.
+- **Platform constraints.** The pinned WSO2 FHIR image is amd64-only and runs under emulation on ARM hosts.
+- **Credentials.** Bedrock credentials come from environment variables or a mounted shared credentials file. ECS/EKS task roles and EC2 instance metadata are not resolved by the proxy yet. Credentials are cached for 5 minutes and dropped on 401/403.
+- **Bedrock catalog.** Only serverless on-demand models appear. Provisioned throughput and Marketplace/SageMaker endpoints are rejected. The model list is refreshed hourly and needs a proxy restart to refresh sooner.
+- **Runtime state.** Circuit-breaker (backend cooldown) state is in memory per worker and resets on container restart. `LLM_ROUTES_JSON`, `REASONING_DISPLAY`, and the cooldown setting are read at startup and need a restart to change.
+- **Reasoning display** applies only to `/llm/*` routes, and only to the client copy. The audit log always keeps the original upstream body.
+- **Audit scope.** Model listings are debug-only and are never written to S3 or the local audit file. Set `AUDIT_LOG_MODE=raw` only for diagnostics, since it retains SSE wire data.
+- **No independent certification.** The compliance mappings (HIPAA, SEC/FINRA, GDPR, EU AI Act) on the product site are vendor claims. This project has not been independently audited or certified.
 
 ## Agent Provost Features Imported
 
